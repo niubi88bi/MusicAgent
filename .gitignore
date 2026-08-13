@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 环境变量（含 API key）
+.env
+
+# 模型权重与大数据
+data/ckpt/
+data/*.db
+data/*.jsonl
+
+# 音频产物
+*.mp3
+*.wav
+*.m4a
+data/output/
+
+# 临时
+tmp/
+*.log
+
+# IDE
+.vscode/
+.idea/
