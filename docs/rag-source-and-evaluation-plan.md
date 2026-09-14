@@ -1,6 +1,6 @@
 # D10-D11 RAG 素材、字段与验收方案
 
-> 状态：方案已形成；D10.0-D10.3 已落地来源目录、17 张风格草稿卡与 390 个韵脚候选；风格卡已完成修订后 AI 语义预审。韵脚词 RAG 必要性审计不支持首稿默认注入，条件检索仍待小型对照实验；检索栈尚未安装。
+> 状态：方案已形成；D10.0-D10.3 已落地来源目录、17 张风格草稿卡与 390 个韵脚候选；17 张风格卡已完成字段级来源复核，均只可进入固定查询，仍为 `draft`。韵脚词 RAG 必要性审计不支持首稿默认注入；检索栈尚未安装。
 > 日期：2026-09-13
 > 当前边界：只保存公开指南的来源事实、项目化短卡和待人工审核的韵脚候选；尚未保存指南全文、安装依赖、构建索引或接入 Agent。
 
@@ -15,7 +15,7 @@
 
 ## 2. 当前事实
 
-- `tools/rag/` 与正式的 `data/rhyme_lexicon.json` 当前不存在；`data/miaoxiang/` 已包含来源说明、4 条来源目录、4 张 v1 粗粒度卡和 17 张 v2 风格草稿卡。
+- `tools/rag/` 与正式的 `data/rhyme_lexicon.json` 当前不存在；`data/miaoxiang/` 已包含来源说明、7 条来源目录、4 张 v1 粗粒度卡和 17 张 v2 风格草稿卡。
 - v1 的 4 张风格卡共塞入 16 个子风格标签，`top_k=3` 会返回全库 75%，无法形成有意义的检索区分。v2 已拆成动感流行 4、EDM 6、民族国韵 4、新世纪 Rap 3，共 17 张；其中 House 进一步拆为 Deep House 与 Tropical House，“苦情民谣电音”明确为项目组合。全部仍为 `draft`，HeartMuLa 后端验证仍为 `unverified`。
 - 已生成 `data/rhyme_candidate_seeds.v1.json` 和 `data/rhyme_lexicon.candidates.v1.jsonl`：十三辙各 30 个、共 390 个项目候选词。它们只通过了 Jieba 固定快照收录、pypinyin 读音和现有十三辙映射校验，主题、情绪、常用度与歌词句尾适用性仍待人工审核。
 - 项目还没有 ChromaDB、sentence-transformers 或 BGE 的已确认安装与锁定记录。
@@ -204,11 +204,15 @@ retrieve_style_templates(
 
 ### B. 最小素材规模
 
-- 风格卡已按用户批准修订为 17 张草稿，覆盖动感流行 4、EDM 6、民族国韵 4、新世纪 Rap 3。House 已拆为 Deep House 与 Tropical House，“苦情民谣电音”已明确为项目组合；Trance 与 Drum & Bass 仅有薄来源证据，补证前不得升级为 `approved`。
-- 修订后 AI 语义预审结果为：15 张 `accept_candidate`、0 张 `revise`、2 张 `hold_for_source`、0 张 `approved`。暂缓项仍为 Trance 与 Drum & Bass。
+- 风格卡共 17 张草稿，覆盖动感流行 4、EDM 6、民族国韵 4、新世纪 Rap 3。House 已拆为 Deep House 与 Tropical House，“苦情民谣电音”已明确为项目组合。
+- 2026-09-14 字段级来源复核后，原 15 张候选可进入固定查询；Trance 与 Drum & Bass 已分别用 Wikipedia 固定版本补充宽泛风格事实，也只可进入固定查询。腾讯多媒体实验室中文官方文档补充了中文歌曲的风格/情绪/语种/场景/强度元数据维度，但不承担具体制作模板来源。Wikipedia 两张补证卡采用 CC BY-SA 4.0，必须保留署名、修改说明和相同许可提示。17 张仍全部为 `draft`，0 张 `approved`。
 - 韵脚候选已按十三辙每辙 30 个生成，共 390 条。这个均衡数量只服务首轮覆盖审核，不是行业标准，也不是正式词库必须保持的配额；人工审核可以删除不自然词，不为凑数补低质量词。
 - 390 条候选的全面人工精审暂缓。先从中东辙选择小批候选完成必要性对照；只有候选词相对固定辙部说明表现出额外收益，才继续审核歌词句尾适用性、主题、情绪和常用度。
 - 17 张风格卡完成固定查询后，再判断是否增加流行抒情、民谣/原声、摇滚、R&B/Soul、Lo-fi、City Pop 等缺口；未出现真实召回问题前不继续扩库。
+
+2026-09-14 固定查询词面基线：8 组预登记查询已覆盖 17 张草稿卡的相关候选集合。top-1 主卡命中 8/8、top-3 相关候选命中 8/8、top-1 来源追溯率 100%；q04“苦情民谣电音”和 q08“国风说唱”仅有 3 分词面证据，标记为低信号。结果文件为 `data/output/evaluations/style-fixed-query-v1/result.json`，只证明固定登记语义的词面排序，不证明 embedding 检索或生成质量。下一步先补强两个低信号查询并保留新版本基线，再决定是否安装 ChromaDB/BGE。
+
+补强后登记 `style_fixed_queries.v1.1.json`，只改 q04/q08 的中文用户表达和关键词，不改风格卡或排序算法。v1.1 仍为 top-1 8/8、top-3 8/8，低信号查询降为 0；结果文件为 `data/output/evaluations/style-fixed-query-v1.1/result.json`。v1 保留为不可变历史基线，v1.1 不代表向量检索或生成效果已通过。
 
 ### C. 离线检索
 
@@ -240,13 +244,13 @@ retrieve_style_templates(
 
 ## 9. 当前已确认与待验证事项
 
-1. **已实现候选数据**：妙响官方知识库的四篇指南已形成 4 条来源目录、4 张 v1 粗粒度历史卡和 17 张 v2 风格草稿卡。House 已拆为 Deep House 与 Tropical House，“苦情民谣电音”已明确为项目组合。v2 的内容哈希、唯一 ID、来源引用与 HeartMuLa-Benchmark 标签子集检查已通过；修订后 AI 语义预审为 15 张可保留候选、2 张补证暂缓。所有卡仍为 `draft`，后端标签跟随效果为 `unverified`。
+1. **已实现候选数据**：妙响官方知识库的四篇指南、两篇 Wikipedia 固定版本补充来源和一篇腾讯多媒体实验室中文官方标签文档已形成 7 条来源目录、4 张 v1 粗粒度历史卡和 17 张 v2 风格草稿卡。House 已拆为 Deep House 与 Tropical House，“苦情民谣电音”已明确为项目组合。v2 的内容哈希、唯一 ID、主/补充来源引用与 HeartMuLa-Benchmark 标签子集检查已通过；17 张均只达到固定查询候选状态。所有卡仍为 `draft`，后端标签跟随效果为 `unverified`。
 2. **已实现候选清单**：已生成十三辙各 30 个、共 390 个韵脚候选。候选由项目按歌词句尾可用性整理，经固定 Jieba 快照、pypinyin 和现有十三辙映射校验；尚未进行人工主题、情绪、常用度和最终适用性审核，因此不是正式词库。
 3. **已完成来源排查**：`ChineseLyrics` 当前无明确再利用许可，正式索引不采用；Jieba 只承担候选收录核验，不把其源频次冒充歌词频率。
 4. **已完成必要性审计**：24 份无 RAG 新主题草稿中，16 份押韵分达到 70，双候选机制让 10/12 个主题至少有一份押韵达标稿；但目标辙行命中率只有 64.8%，并出现把言前、乜斜、人辰误称为中东辙的明确错误。当前证据支持先补确定性辙部说明，不支持首稿默认注入韵脚词。
-5. **待完成**：人工审核 17 张风格卡；用户批准后，用 4 份现有押韵失败草稿做“现有反馈 / 固定映射 / 固定映射加 8 个候选词”的 12 次小型回炉对照。结果再决定是否继续审核 390 词和实现条件检索。
+5. **待完成**：固定查询词面基线及 q04/q08 的表达补强已完成；下一步做 embedding 对照，之后才能讨论 `approved`。韵脚路线已完成必要性与 section-consistency 检查，390 词审核及候选词 RAG 继续暂停。
 
-下一步不直接安装检索依赖，也不先精审全部 390 词。先完成韵脚辅助必要性小试点；候选数据通过结构检查或 AI 预审都不等于 RAG 效果已验证。
+下一步不先精审全部 390 词。风格卡先完成用户内容确认和固定查询设计，再决定是否安装检索依赖；候选数据通过结构检查、AI 审计或来源补证都不等于 RAG 效果已验证。
 
 ## 10. 核验来源
 
@@ -255,6 +259,10 @@ retrieve_style_templates(
 - 妙响潮流电子（EDM）官方指南：https://bytedance.larkoffice.com/wiki/XiePwOqqtinAfzkag5xcXd3In9g
 - 妙响民族国韵官方指南：https://bytedance.larkoffice.com/wiki/JauMwFPdyiOY6OkxX5LcqwZhnvc
 - 妙响新世纪 Rap 官方指南：https://bytedance.larkoffice.com/wiki/EWznw3NAPilTZJkgDkhc22fYnnb
+- Wikipedia Trance 固定版本（CC BY-SA 4.0）：https://en.wikipedia.org/w/index.php?title=Trance_music&oldid=1371451095
+- Wikipedia Drum and bass 固定版本（CC BY-SA 4.0）：https://en.wikipedia.org/w/index.php?title=Drum_and_bass&oldid=1369972946
+- Wikipedia 内容复用与署名规则：https://en.wikipedia.org/wiki/Wikipedia:Copyrights
+- Native Instruments 法律信息（因 AI/数据挖掘用途限制而不纳入 RAG 来源）：https://www.native-instruments.com/pages/legal-information
 - HeartMuLa 官方仓库：https://github.com/HeartMuLa/heartlib
 - HeartMuLa-Benchmark：https://modelscope.cn/datasets/HeartMuLa/HeartMuLa-Benchmark
 - HeartMuLa 标签范围未答复 issue：https://github.com/HeartMuLa/heartlib/issues/17
