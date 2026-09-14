@@ -20,6 +20,13 @@ from agents.lyricist_agent import LyricistAgent
 from agents.schemas import LyricDraft, SongRequirement
 from services.config import get_settings
 from services.llm import DeepSeekLLM
+from scripts.rhyme_scope_shadow import (
+    analyze_rhyme_scope,
+    build_balanced_feedback,
+    build_section_consistency_triage,
+    choose_feedback_budget,
+    section_change_metrics,
+)
 from tools.lyrics_quality.parser import parse_lyric_lines
 from tools.lyrics_quality.scorer import format_revision_feedback, score_lyrics
 from tools.lyrics_quality.thirteen_rhymes import RHYME_GROUPS
@@ -31,6 +38,16 @@ SOURCE_FAMILIES = ("comeback-rock", "summer-storm-dancepop")
 PERSONAS = ("structured", "imagery")
 VARIANTS = ("current_feedback", "fixed_mapping")
 B2_VARIANT = "fixed_mapping_b2"
+B3_VARIANT = "balanced_global_b3"
+B4_VARIANT = "balanced_chorus_b4"
+B3_B4_VARIANTS = (B3_VARIANT, B4_VARIANT)
+SECTION_CONSISTENCY_VARIANT = "section_consistency_b5"
+SECTION_CONSISTENCY_FAMILIES = (
+    "campus-graduation-rap",
+    "late-cafe-jazz",
+    "morning-commute-pop",
+    "night-running-electronic",
+)
 RHYME_EXAMPLES = {"中东": ("东", "风", "梦", "星")}
 BLIND_SEED = 20260913
 DEFAULT_STAGE1_BASELINE = Path(
@@ -54,11 +71,12 @@ def _write_json(path: Path, payload: object) -> None:
     )
 
 
-def load_source_cases(source_root: Path = SOURCE_ROOT) -> tuple[SourceCase, ...]:
-    """只读取预先锁定的两个失败主题，不扫描或挑选新结果。"""
-
+def _load_cases(
+    family_ids: tuple[str, ...],
+    source_root: Path,
+) -> tuple[SourceCase, ...]:
     cases: list[SourceCase] = []
-    for family_id in SOURCE_FAMILIES:
+    for family_id in family_ids:
         family_dir = source_root / family_id
         requirement = SongRequirement.model_validate_json(
             (family_dir / "requirement.json").read_text(encoding="utf-8")
@@ -80,6 +98,23 @@ def load_source_cases(source_root: Path = SOURCE_ROOT) -> tuple[SourceCase, ...]
                 )
             )
     return tuple(cases)
+
+
+def load_source_cases(source_root: Path = SOURCE_ROOT) -> tuple[SourceCase, ...]:
+    """只读取预先锁定的两个失败主题，不扫描或挑选新结果。"""
+
+    return _load_cases(SOURCE_FAMILIES, source_root)
+
+
+def load_section_consistency_cases(
+    source_root: Path = SOURCE_ROOT,
+) -> tuple[SourceCase, ...]:
+    """读取对押韵方法留出的四个 D9.4 验证家族，共八份原始稿。"""
+
+    overlap = set(SECTION_CONSISTENCY_FAMILIES) & set(SOURCE_FAMILIES)
+    if overlap:
+        raise ValueError(f"section consistency 验证集与 B3/B4 开发集重叠：{overlap}")
+    return _load_cases(SECTION_CONSISTENCY_FAMILIES, source_root)
 
 
 def build_mapping_note(target_rhyme_group: str | None) -> str:
@@ -191,6 +226,234 @@ def build_call_plan(cases: tuple[SourceCase, ...]) -> list[tuple[SourceCase, str
         order = VARIANTS if index % 2 == 0 else tuple(reversed(VARIANTS))
         plan.extend((case, variant) for variant in order)
     return plan
+
+
+def build_b3_b4_call_plan(
+    cases: tuple[SourceCase, ...],
+) -> list[tuple[SourceCase, str]]:
+    """同一源稿内交替 B3/B4 顺序，减少固定调用顺序偏置。"""
+
+    plan: list[tuple[SourceCase, str]] = []
+    for index, case in enumerate(cases):
+        order = B3_B4_VARIANTS if index % 2 == 0 else tuple(reversed(B3_B4_VARIANTS))
+        plan.extend((case, variant) for variant in order)
+    return plan
+
+
+def _scope_for_variant(variant: str) -> str:
+    if variant == B3_VARIANT:
+        return "global_target"
+    if variant == B4_VARIANT:
+        return "chorus_target"
+    raise ValueError(f"变体 {variant} 没有影子 scope")
+
+
+def build_b3_b4_plan_summary(cases: tuple[SourceCase, ...]) -> dict[str, object]:
+    """离线测量候选反馈预算；不调用 LLM。"""
+
+    budget = choose_feedback_budget(
+        [
+            (case.draft.lyrics, case.draft.hook, case.requirement.target_rhyme_group)
+            for case in cases
+        ]
+    )
+    selected = int(budget["selected_issue_budget"])
+    coverage: list[dict[str, object]] = []
+    for case in cases:
+        for variant in B3_B4_VARIANTS:
+            scope = _scope_for_variant(variant)
+            package = build_balanced_feedback(
+                case.draft.lyrics,
+                case.draft.hook,
+                case.requirement.target_rhyme_group,
+                scope,
+                selected,
+            )
+            coverage.append(
+                {
+                    "source_id": case.source_id,
+                    "variant": variant,
+                    "rhyme_scope": scope,
+                    "selected_issue_count": package["selected_issue_count"],
+                    "omitted_issue_count": package["omitted_issue_count"],
+                    "problem_units": package["problem_units"],
+                    "uncovered_units": package["uncovered_units"],
+                    "estimated_characters": package["estimated_characters"],
+                }
+            )
+    return {
+        "logical_calls": len(cases) * 2,
+        "variants": list(B3_B4_VARIANTS),
+        "production_behavior_changed": False,
+        "shadow_only": True,
+        "feedback_budget_selection": budget,
+        "feedback_coverage": coverage,
+        "call_plan": [
+            {"source_id": case.source_id, "variant": variant}
+            for case, variant in build_b3_b4_call_plan(cases)
+        ],
+    }
+
+
+def build_section_consistency_plan_summary(
+    cases: tuple[SourceCase, ...],
+) -> dict[str, object]:
+    """生成 B5 离线分流；不把 75% 或 100% 写成生产通过门槛。"""
+
+    source_rows: list[dict[str, object]] = []
+    for case in cases:
+        triage = build_section_consistency_triage(
+            case.draft.lyrics,
+            case.draft.hook,
+            case.requirement.target_rhyme_group,
+        )
+        source_rows.append(
+            {
+                "source_id": case.source_id,
+                "family_id": case.family_id,
+                "persona_id": case.persona_id,
+                "target_origin": "system_suggested",
+                "system_target_rhyme_group_for_reference_only": (
+                    case.requirement.target_rhyme_group
+                ),
+                "triage_action": triage["triage_action"],
+                "automatic_rewrite_authorized": False,
+                "minimum_chorus_local_consistency": triage[
+                    "minimum_chorus_local_consistency"
+                ],
+                "chorus_templates": triage["chorus_templates"],
+            }
+        )
+    preserve = [
+        row for row in source_rows if row["triage_action"] == "preserve_no_rewrite"
+    ]
+    human_review = [
+        row
+        for row in source_rows
+        if row["triage_action"] == "human_review_before_any_rewrite"
+    ]
+    return {
+        "stage": "section-consistency-heldout-preflight",
+        "variant": SECTION_CONSISTENCY_VARIANT,
+        "source_drafts": len(cases),
+        "source_families": list(SECTION_CONSISTENCY_FAMILIES),
+        "excluded_development_families": list(SOURCE_FAMILIES),
+        "target_origin": "system_suggested",
+        "target_origin_evidence": (
+            "The source pool was generated by RequirementAgent from theme-only plans; "
+            "users did not explicitly choose rhyme groups."
+        ),
+        "system_target_groups_for_reference_only": sorted(
+            {
+                str(case.requirement.target_rhyme_group)
+                for case in cases
+                if case.requirement.target_rhyme_group
+            }
+        ),
+        "original_source_control_included": True,
+        "production_behavior_changed": False,
+        "shadow_only": True,
+        "formal_threshold_selected": False,
+        "planned_llm_calls_now": 0,
+        "preserve_no_rewrite_count": len(preserve),
+        "human_review_before_any_rewrite_count": len(human_review),
+        "maximum_future_calls_after_human_confirmation": len(human_review),
+        "source_rows": source_rows,
+        "future_comparison_if_approved": {
+            "Z": "original source draft; no API call",
+            "X": "section-consistency minimal rewrite; only for human-confirmed defects",
+            "Y": "explicit-target rewrite; omitted until a genuinely user-explicit sample exists",
+        },
+        "formal_method_decision": "not_allowed_from_offline_preflight",
+        "limitations": [
+            "Held out from B3/B4 rhyme-method design, but reused from the D9.4 source pool.",
+            "A local-consistency value is descriptive and does not judge naturalness.",
+            "Rows below 1.0 require human review; no rewrite is automatically authorized.",
+            "No genuinely user-explicit rhyme-target sample exists in this set.",
+        ],
+    }
+
+
+def build_section_consistency_review_markdown(
+    cases: tuple[SourceCase, ...],
+    plan: dict[str, object],
+) -> str:
+    """展示只需人工判断的原始副歌；此时还没有任何改写候选。"""
+
+    case_by_id = {case.source_id: case for case in cases}
+    rows = [
+        row
+        for row in plan["source_rows"]
+        if row["triage_action"] == "human_review_before_any_rewrite"
+    ]
+    markdown = [
+        "# Section consistency 人工预检",
+        "",
+        "这里只判断原稿副歌的 75% 局部一致性是否真的需要修改。",
+        "系统建议目标仅供背景参考，不是本轮修改目标；当前没有调用 DeepSeek。",
+        "",
+    ]
+    for index, row in enumerate(rows, start=1):
+        case = case_by_id[str(row["source_id"])]
+        report = analyze_rhyme_scope(
+            case.draft.lyrics,
+            case.draft.hook,
+            case.requirement.target_rhyme_group,
+            "section_consistency",
+            target_origin="system_suggested",
+        )
+        markdown.extend(
+            [
+                f"## {index}. {case.source_id}",
+                "",
+                f"- 主题：{case.requirement.theme}",
+                f"- Hook：{case.draft.hook}",
+                f"- 系统建议目标（仅记录）：{case.requirement.target_rhyme_group}",
+                "- 原稿控制：Z，不调用 API",
+                "",
+            ]
+        )
+        seen_templates: set[str] = set()
+        for stanza in report["stanzas"]:
+            if stanza["section"] != "Chorus":
+                continue
+            template_id = str(stanza["template_id"])
+            if template_id in seen_templates:
+                continue
+            seen_templates.add(template_id)
+            markdown.extend(
+                [
+                    f"### Chorus 模板（重复 {stanza['occurrence_count']} 次）",
+                    "",
+                    f"局部模式：{stanza['local_pattern']}；"
+                    f"一致性：{float(stanza['local_consistency_rate']):.0%}；"
+                    f"主导辙：{stanza['dominant_rhyme_group']}。",
+                    "",
+                ]
+            )
+            for line in stanza["lines"]:
+                markdown.append(
+                    f"- {line['text']}　`{line['rhyme_group'] or '未分类'}`"
+                )
+            markdown.extend(
+                [
+                    "",
+                    "人工判断：保持原稿 / 确需局部调整 / 无法仅凭文本判断",
+                    "",
+                    "备注：",
+                    "",
+                ]
+            )
+    markdown.extend(
+        [
+            "## 解释边界",
+            "",
+            "75% 只是筛查切片，不是失败阈值。只有人工确认存在听感或文本问题后，"
+            "才规划 section-consistency 最小改写；否则保持 Z 原稿。",
+            "",
+        ]
+    )
+    return "\n".join(markdown)
 
 
 def build_aggregate(results: list[dict[str, object]]) -> dict[str, object]:
@@ -553,6 +816,270 @@ def run_b2_experiment(
     return experiment_dir
 
 
+def _repeated_chorus_sync(
+    source_report: dict[str, object], output_report: dict[str, object]
+) -> dict[str, object]:
+    """按源稿重复模板的 stanza 位置检查输出是否同步，近似模板不合并。"""
+
+    output_by_index = {
+        int(stanza["stanza_index"]): stanza["template_id"]
+        for stanza in output_report["stanzas"]
+        if stanza["section"] == "Chorus"
+    }
+    checks: list[dict[str, object]] = []
+    for template in source_report["chorus_templates"]:
+        if int(template["occurrence_count"]) < 2:
+            continue
+        indexes = [int(item["stanza_index"]) for item in template["occurrences"]]
+        output_ids = [output_by_index.get(index) for index in indexes]
+        checks.append(
+            {
+                "source_template_id": template["template_id"],
+                "source_stanza_indexes": indexes,
+                "output_template_ids": output_ids,
+                "all_positions_present": all(item is not None for item in output_ids),
+                "synchronized": (
+                    all(item is not None for item in output_ids)
+                    and len(set(output_ids)) == 1
+                ),
+            }
+        )
+    return {
+        "repeated_template_groups_checked": len(checks),
+        "repeated_template_groups_synchronized": sum(
+            bool(item["synchronized"]) for item in checks
+        ),
+        "checks": checks,
+    }
+
+
+def _shadow_metric_mean(
+    results: list[dict[str, object]], section: str, field: str
+) -> float | None:
+    values: list[float] = []
+    for result in results:
+        seen_templates: set[str] = set()
+        for stanza in result["shadow_metrics"]["stanzas"]:
+            if stanza["section"] != section:
+                continue
+            if section == "Chorus" and stanza["template_id"]:
+                template_id = str(stanza["template_id"])
+                if template_id in seen_templates:
+                    continue
+                seen_templates.add(template_id)
+            value = stanza[field]
+            if value is not None:
+                values.append(float(value))
+    return round(sum(values) / len(values), 3) if values else None
+
+
+def build_b3_b4_aggregate(results: list[dict[str, object]]) -> dict[str, object]:
+    """只做描述性汇总，不输出生产准入结论。"""
+
+    completed = [item for item in results if item["status"] == "completed"]
+    by_variant: dict[str, dict[str, object]] = {}
+    for variant in B3_B4_VARIANTS:
+        items = [item for item in completed if item["variant"] == variant]
+        by_variant[variant] = {
+            "completed": len(items),
+            "production_rhyme_score_mean_for_reference_only": round(
+                sum(float(item["production_metrics"]["rhyme_score"]) for item in items)
+                / len(items),
+                1,
+            )
+            if items
+            else None,
+            "chorus_target_match_rate_mean": _shadow_metric_mean(
+                items, "Chorus", "target_match_rate"
+            ),
+            "verse_local_consistency_rate_mean": _shadow_metric_mean(
+                items, "Verse", "local_consistency_rate"
+            ),
+            "hook_matches_target_count": sum(
+                item["shadow_metrics"]["hook"]["matches_target"] is True
+                for item in items
+            ),
+            "mean_changed_source_lines": round(
+                sum(
+                    int(item["section_change_metrics"]["changed_source_line_count"])
+                    for item in items
+                )
+                / len(items),
+                1,
+            )
+            if items
+            else None,
+            "mean_non_target_changed_source_line_rate": round(
+                sum(
+                    float(
+                        item["section_change_metrics"][
+                            "non_target_changed_source_line_rate"
+                        ]
+                    )
+                    for item in items
+                )
+                / len(items),
+                3,
+            )
+            if items
+            else None,
+            "repeated_chorus_sync_count": sum(
+                item["repeated_chorus_sync"][
+                    "repeated_template_groups_synchronized"
+                ]
+                for item in items
+            ),
+            "repeated_chorus_groups_checked": sum(
+                item["repeated_chorus_sync"]["repeated_template_groups_checked"]
+                for item in items
+            ),
+        }
+    return {
+        "logical_calls_planned": 8,
+        "logical_calls_completed": len(completed),
+        "logical_calls_failed": len(results) - len(completed),
+        "by_variant": by_variant,
+        "formal_method_decision": "not_allowed_from_development_screening",
+        "human_naturalness_review_status": "pending",
+        "limitations": [
+            "Four locked drafts, two themes, one rhyme group, one stochastic sample per condition.",
+            "Production score is saved for historical reference and cannot judge chorus_target.",
+            "B3 includes corrected shadow section attribution as part of the feedback pipeline.",
+        ],
+    }
+
+
+def run_b3_b4_experiment(source_root: Path, output_root: Path) -> Path:
+    """运行 B3/B4 开发筛查；不修改生产评分器或 LangGraph。"""
+
+    cases = load_source_cases(source_root)
+    plan = build_b3_b4_plan_summary(cases)
+    issue_budget = int(plan["feedback_budget_selection"]["selected_issue_budget"])
+    experiment_dir = output_root / f"rhyme-assistance-b3-b4-{uuid4().hex}"
+    experiment_dir.mkdir(parents=True, exist_ok=False)
+    settings = get_settings()
+    _write_json(
+        experiment_dir / "experiment_config.json",
+        {
+            "stage": "b3-b4-development-screening",
+            "source_drafts": len(cases),
+            "logical_calls": 8,
+            "call_plan": plan["call_plan"],
+            "feedback_budget_selection": plan["feedback_budget_selection"],
+            "model": settings.deepseek_model,
+            "temperature": 0.85,
+            "max_tokens": 2200,
+            "production_behavior_changed": False,
+            "shadow_only": True,
+            "rhyme_word_rag_used": False,
+            "audio_generated": False,
+            "scope_contract": {
+                B3_VARIANT: "global_target",
+                B4_VARIANT: "chorus_target",
+            },
+            "limitations": [
+                "Development screening only; no production method decision is allowed.",
+                "Each condition has one stochastic rewrite per source.",
+                "Only two themes and the 中东 rhyme group are covered.",
+                "Human blind review and held-out validation are required.",
+            ],
+        },
+    )
+    results: list[dict[str, object]] = []
+    for call_index, (case, variant) in enumerate(
+        build_b3_b4_call_plan(cases), start=1
+    ):
+        scope = _scope_for_variant(variant)
+        feedback_package = build_balanced_feedback(
+            case.draft.lyrics,
+            case.draft.hook,
+            case.requirement.target_rhyme_group,
+            scope,
+            issue_budget,
+        )
+        print(f"[{call_index}/8] {case.source_id} / {variant}", flush=True)
+        llm = DeepSeekLLM(settings)
+        started_at = time.perf_counter()
+        result: dict[str, object] = {
+            "call_index": call_index,
+            "source_id": case.source_id,
+            "family_id": case.family_id,
+            "persona_id": case.persona_id,
+            "variant": variant,
+            "rhyme_scope": scope,
+            "feedback_package": feedback_package,
+            "source_shadow_metrics": analyze_rhyme_scope(
+                case.draft.lyrics,
+                case.draft.hook,
+                case.requirement.target_rhyme_group,
+                scope,
+            ),
+        }
+        try:
+            output = LyricistAgent(llm, persona=case.persona_id).run(
+                case.requirement,
+                revision_feedback=str(feedback_package["text"]),
+                previous_draft=case.draft,
+            )
+            output_shadow = analyze_rhyme_scope(
+                output.lyrics,
+                output.hook,
+                case.requirement.target_rhyme_group,
+                scope,
+            )
+            target_sections = (
+                {"Verse", "Pre-Chorus", "Chorus", "Hook", "Bridge"}
+                if scope == "global_target"
+                else {"Chorus", "Hook"}
+            )
+            result.update(
+                {
+                    "status": "completed",
+                    "wall_seconds": round(time.perf_counter() - started_at, 3),
+                    "output_draft": output.model_dump(mode="json"),
+                    "production_metrics": quality_metrics(output, case.requirement),
+                    "shadow_metrics": output_shadow,
+                    "line_change_metrics": line_change_metrics(case.draft, output),
+                    "section_change_metrics": section_change_metrics(
+                        case.draft.lyrics, output.lyrics, target_sections
+                    ),
+                    "repeated_chorus_sync": _repeated_chorus_sync(
+                        result["source_shadow_metrics"], output_shadow
+                    ),
+                    "telemetry": DeepSeekLLM.summarize_call_records(
+                        llm.telemetry_snapshot()
+                    ),
+                }
+            )
+        except Exception as error:
+            result.update(
+                {
+                    "status": "failed",
+                    "wall_seconds": round(time.perf_counter() - started_at, 3),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                    "telemetry": DeepSeekLLM.summarize_call_records(
+                        llm.telemetry_snapshot()
+                    ),
+                }
+            )
+        finally:
+            llm.close()
+        results.append(result)
+        _write_json(experiment_dir / f"call-{call_index:02d}.json", result)
+
+    _write_json(experiment_dir / "results.json", results)
+    _write_json(experiment_dir / "summary.json", build_b3_b4_aggregate(results))
+    write_blind_review(
+        experiment_dir,
+        cases,
+        results,
+        variants=B3_B4_VARIANTS,
+        title="B3/B4 分段押韵匿名复核",
+    )
+    return experiment_dir
+
+
 def run_experiment(source_root: Path, output_root: Path) -> Path:
     cases = load_source_cases(source_root)
     experiment_dir = output_root / f"rhyme-assistance-stage1-{uuid4().hex}"
@@ -638,25 +1165,77 @@ def run_experiment(source_root: Path, output_root: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="运行第一阶段韵脚辅助对照实验。")
-    parser.add_argument("--mode", choices=("stage1", "b2"), default="stage1")
+    parser.add_argument(
+        "--mode",
+        choices=("stage1", "b2", "b3_b4", "section_consistency"),
+        default="stage1",
+    )
     parser.add_argument("--source-root", type=Path, default=SOURCE_ROOT)
     parser.add_argument("--out", type=Path, default=OUTPUT_ROOT)
     parser.add_argument("--baseline", type=Path, default=DEFAULT_STAGE1_BASELINE)
     parser.add_argument(
-        "--execute", action="store_true", help="确认调用 8 次逻辑 DeepSeek 改写"
+        "--execute", action="store_true", help="执行所选模式已获批准的 DeepSeek 改写"
+    )
+    parser.add_argument(
+        "--plan-output",
+        type=Path,
+        help="可选：将离线计划写入指定 JSON；不会因此调用 DeepSeek。",
+    )
+    parser.add_argument(
+        "--review-output",
+        type=Path,
+        help="可选：将 section consistency 人工预检稿写入指定 Markdown。",
     )
     args = parser.parse_args()
+    if args.mode == "section_consistency":
+        if args.execute:
+            parser.error(
+                "section_consistency 当前只获批离线预检；需人工确认候选后再实现真实调用。"
+            )
+        section_cases = load_section_consistency_cases(args.source_root)
+        section_plan = build_section_consistency_plan_summary(section_cases)
+        if args.plan_output:
+            args.plan_output.parent.mkdir(parents=True, exist_ok=True)
+            _write_json(args.plan_output, section_plan)
+        if args.review_output:
+            args.review_output.parent.mkdir(parents=True, exist_ok=True)
+            args.review_output.write_text(
+                build_section_consistency_review_markdown(
+                    section_cases,
+                    section_plan,
+                ),
+                encoding="utf-8",
+            )
+        print(json.dumps(section_plan, ensure_ascii=False, indent=2))
+        return
+
     cases = load_source_cases(args.source_root)
     if not args.execute:
+        b3_b4_plan = (
+            build_b3_b4_plan_summary(cases) if args.mode == "b3_b4" else None
+        )
         print(
             json.dumps(
                 {
                     "source_drafts": len(cases),
                     "mode": args.mode,
-                    "logical_calls": 4 if args.mode == "b2" else len(cases) * len(VARIANTS),
-                    "variants": [B2_VARIANT] if args.mode == "b2" else list(VARIANTS),
+                    "logical_calls": (
+                        4
+                        if args.mode == "b2"
+                        else 8
+                        if args.mode == "b3_b4"
+                        else len(cases) * len(VARIANTS)
+                    ),
+                    "variants": (
+                        [B2_VARIANT]
+                        if args.mode == "b2"
+                        else list(B3_B4_VARIANTS)
+                        if args.mode == "b3_b4"
+                        else list(VARIANTS)
+                    ),
                     "source_ids": [case.source_id for case in cases],
                     "baseline_reused": str(args.baseline) if args.mode == "b2" else None,
+                    "b3_b4_plan": b3_b4_plan,
                     "rhyme_word_rag_used": False,
                     "message": "加 --execute 才会调用真实 DeepSeek。",
                 },
@@ -669,6 +1248,8 @@ def main() -> None:
         experiment_dir = run_b2_experiment(
             args.source_root, args.out, args.baseline
         )
+    elif args.mode == "b3_b4":
+        experiment_dir = run_b3_b4_experiment(args.source_root, args.out)
     else:
         experiment_dir = run_experiment(args.source_root, args.out)
     print(f"实验完成：{experiment_dir.resolve()}", flush=True)

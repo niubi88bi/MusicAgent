@@ -4,15 +4,27 @@ import unittest
 
 from scripts.evaluate_rhyme_assistance_stage1 import (
     B2_VARIANT,
+    B3_VARIANT,
+    B4_VARIANT,
+    SECTION_CONSISTENCY_FAMILIES,
+    SECTION_CONSISTENCY_VARIANT,
+    SOURCE_FAMILIES,
     VARIANTS,
+    _repeated_chorus_sync,
     build_aggregate,
     build_b2_aggregate,
     build_b2_mapping_note,
+    build_b3_b4_aggregate,
+    build_b3_b4_call_plan,
+    build_b3_b4_plan_summary,
+    build_section_consistency_plan_summary,
+    build_section_consistency_review_markdown,
     build_call_plan,
     build_feedback,
     build_mapping_note,
     line_change_metrics,
     load_source_cases,
+    load_section_consistency_cases,
     quality_metrics,
 )
 
@@ -105,6 +117,85 @@ class RhymeAssistanceStage1Tests(unittest.TestCase):
         self.assertTrue(aggregate["baseline_reused_not_recalled"])
         self.assertEqual(aggregate["b2_additional_rescue_count"], 3)
         self.assertTrue(aggregate["automatic_gate_passed"])
+
+    def test_b3_b4_plan_has_eight_interleaved_calls_and_full_feedback_coverage(self) -> None:
+        call_plan = build_b3_b4_call_plan(self.cases)
+        self.assertEqual(len(call_plan), 8)
+        self.assertEqual(
+            [variant for _, variant in call_plan[:4]],
+            [B3_VARIANT, B4_VARIANT, B4_VARIANT, B3_VARIANT],
+        )
+        summary = build_b3_b4_plan_summary(self.cases)
+        self.assertEqual(summary["logical_calls"], 8)
+        self.assertFalse(summary["production_behavior_changed"])
+        self.assertTrue(summary["shadow_only"])
+        for item in summary["feedback_coverage"]:
+            self.assertEqual(item["uncovered_units"], [], item["source_id"])
+
+    def test_repeated_chorus_sync_checks_all_source_occurrences(self) -> None:
+        source = {
+            "chorus_templates": [
+                {
+                    "template_id": "source-template",
+                    "occurrence_count": 2,
+                    "occurrences": [
+                        {"stanza_index": 1},
+                        {"stanza_index": 2},
+                    ],
+                }
+            ]
+        }
+        output = {
+            "stanzas": [
+                {"section": "Chorus", "stanza_index": 1, "template_id": "same"},
+                {"section": "Chorus", "stanza_index": 2, "template_id": "same"},
+            ]
+        }
+        result = _repeated_chorus_sync(source, output)
+        self.assertEqual(result["repeated_template_groups_checked"], 1)
+        self.assertEqual(result["repeated_template_groups_synchronized"], 1)
+
+    def test_b3_b4_aggregate_forbids_formal_method_decision(self) -> None:
+        aggregate = build_b3_b4_aggregate([])
+        self.assertEqual(
+            aggregate["formal_method_decision"],
+            "not_allowed_from_development_screening",
+        )
+        self.assertEqual(aggregate["human_naturalness_review_status"], "pending")
+
+    def test_section_consistency_plan_uses_heldout_system_targets_without_calls(self) -> None:
+        cases = load_section_consistency_cases()
+        self.assertEqual(len(cases), 8)
+        self.assertEqual(
+            {case.family_id for case in cases}, set(SECTION_CONSISTENCY_FAMILIES)
+        )
+        self.assertFalse({case.family_id for case in cases} & set(SOURCE_FAMILIES))
+
+        plan = build_section_consistency_plan_summary(cases)
+        self.assertEqual(plan["variant"], SECTION_CONSISTENCY_VARIANT)
+        self.assertEqual(plan["planned_llm_calls_now"], 0)
+        self.assertEqual(plan["preserve_no_rewrite_count"], 6)
+        self.assertEqual(plan["human_review_before_any_rewrite_count"], 2)
+        self.assertEqual(plan["maximum_future_calls_after_human_confirmation"], 2)
+        self.assertEqual(
+            set(plan["system_target_groups_for_reference_only"]),
+            {"中东", "怀来", "江阳"},
+        )
+        self.assertFalse(plan["formal_threshold_selected"])
+        self.assertEqual(
+            plan["formal_method_decision"],
+            "not_allowed_from_offline_preflight",
+        )
+        self.assertTrue(
+            all(row["target_origin"] == "system_suggested" for row in plan["source_rows"])
+        )
+        review = build_section_consistency_review_markdown(cases, plan)
+        self.assertEqual(review.count("## 1."), 1)
+        self.assertEqual(review.count("## 2."), 1)
+        self.assertIn("late-cafe-jazz--imagery", review)
+        self.assertIn("night-running-electronic--imagery", review)
+        self.assertIn("原稿控制：Z", review)
+        self.assertIn("75% 只是筛查切片", review)
 
 
 if __name__ == "__main__":
