@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MusicAgent · 歌曲创作工作台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#home" aria-label="MusicAgent 首页"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>MusicAgent<span class="brand-dot">.</span></a>
+    <button class="new-button" data-action="home"><span aria-hidden="true">＋</span> 新建创作</button>
+    <nav aria-label="主导航"><button class="nav-item active" data-action="home">创作工作台 <span>↗</span></button><button class="nav-item" data-action="library">创作记录 <span id="record-count"></span></button></nav>
+    <div class="sidebar-history"><p class="eyebrow">真实示例</p><div id="history-list"></div></div>
+    <div class="sidebar-bottom"><span class="small-dot"></span><div>本地创作空间<small>歌词 · 质检 · 音乐</small></div></div>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar"><span id="breadcrumb">创作工作台</span><div class="topbar-right"><span class="preview-label">界面预览</span><button class="quiet-button" data-action="quality-demo">查看质检示例 ↗</button></div></header>
+    <main>
+      <section id="home-view" class="view home-view">
+        <div class="composer-intro"><span class="intro-kicker">A LITTLE IDEA. YOUR NEXT SONG.</span><h1>把你的故事，<span class="headline-tail">写成一首歌<span>。</span></span></h1><p>写下一个画面、一种心情，或一段想被唱出的故事。</p></div>
+        <form id="composer" class="composer">
+          <label class="sr-only" for="theme">描述你想创作的歌曲</label>
+          <textarea id="theme" maxlength="200" placeholder="例如：写一首关于夏夜下班回家的歌，温暖治愈，带一点 city pop 的感觉…"></textarea>
+          <div class="composer-toolbar"><span class="mode-label"><span class="small-dot"></span> 歌词创作 <span class="mode-divider">/</span> 自动质检与改写</span><button class="primary-button" type="submit">生成歌词 <span aria-hidden="true">↗</span></button></div>
+        </form>
+        <div class="suggestions" aria-label="灵感提示"><span>从一点灵感开始</span><button data-prompt="夏夜下班回家，温暖治愈的 city pop">夏夜归途</button><button data-prompt="毕业那天和朋友告别，带着希望的流行歌曲">写给毕业的我们</button><button data-prompt="在雨天散步，安静温柔的中文民谣">雨天慢慢走</button></div>
+        <div class="preview-note"><span aria-hidden="true">↳</span> 当前可浏览真实创作记录与试听，实时生成将在接口接通后开放。</div>
+        <section class="examples-section" aria-labelledby="examples-title"><div class="section-heading"><div><h2 id="examples-title">听见灵感的下一步</h2><p>来自项目实际运行的歌词与音乐</p></div><span class="muted">真实产物 / 非实时生成</span></div><div id="examples-list" class="examples-list"></div></section>
+      </section>
+      <section id="library-view" class="view library-view" hidden><p class="intro-kicker">YOUR CREATIVE SPACE</p><h1>创作记录</h1><p class="muted">保留每一次灵感，也保留它成为作品的过程。</p><div id="library-list" class="library-list"></div></section>
+      <section id="workspace-view" class="view workspace-view" hidden>
+        <div id="task-status" class="task-status" role="status" aria-live="polite" hidden></div>
+        <div class="workspace-heading"><div><p class="eyebrow" id="work-source"></p><h1 id="work-title"></h1><div id="work-tags" class="work-tags"></div></div><button class="secondary-button" id="copy-button">复制歌词</button></div>
+        <div class="workspace-grid"><article class="lyric-pane"><div class="pane-toolbar"><div class="tab-list" role="tablist" aria-label="作品内容"><button id="lyrics-tab" class="tab active" role="tab" aria-selected="true" aria-controls="lyrics-panel">歌词</button><button id="process-tab" class="tab" role="tab" aria-selected="false" aria-controls="process-panel">创作过程</button></div><label class="version-label">版本 <select id="version-select" aria-label="查看歌词版本"></select></label></div><div id="lyrics-panel" role="tabpanel" aria-labelledby="lyrics-tab"><div class="lyric-heading"><span id="version-caption"></span><span id="selected-version" class="selected-label"></span></div><div id="lyrics-content" class="lyrics-content"></div></div><div id="process-panel" class="process-panel" role="tabpanel" aria-labelledby="process-tab" hidden></div></article><aside class="quality-pane" aria-label="歌词规则检查"><div class="quality-heading"><h2>歌词质检</h2><span id="quality-status"></span></div><div id="quality-content"></div></aside></div>
+        <div id="text-audio-note" class="text-audio-note"><div><strong>让这段歌词有声音</strong><p>本次真实验证只生成了文本，没有生成音频。</p></div><button class="secondary-button" id="audio-preview-button">生成 30 秒试听 ↗</button></div>
+      </section>
+    </main>
+    <footer class="page-footer"><span>MusicAgent</span><span>让创作有灵感，让修改有依据。</span></footer>
+  </div>
+  <section id="audio-dock" class="audio-dock" aria-label="作品播放器" hidden><div class="mini-record" aria-hidden="true"></div><div class="playing-title"><strong id="audio-title"></strong><span id="audio-meta">历史生成音频</span></div><audio id="audio-player" controls preload="metadata"></audio><a id="download-audio" class="quiet-button" download="musicagent-demo.mp3">下载音频 ↓</a></section>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

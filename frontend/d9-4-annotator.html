@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>D9.4 歌词节奏盲标</title>
+    <link rel="stylesheet" href="d9-4-annotator.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">MusicAgent · D9.4</p>
+          <h1>歌词文本节奏盲标</h1>
+          <p class="subtle">只判断当前段落的句长与停顿是否需要修改，不判断主题、押韵或普适可唱性。</p>
+        </div>
+        <div class="progress-box" aria-live="polite">
+          <span id="progressText">尚未载入</span>
+          <progress id="progressBar" value="0" max="1"></progress>
+          <span class="save-status" id="saveStatus">本地进度将在填写时自动保存</span>
+        </div>
+      </header>
+
+      <section class="loader" id="loader">
+        <h2>载入盲卡和标注模板</h2>
+        <p>文件只在本机浏览器中读取，不会上传。重新打开页面后可从浏览器本地进度继续。</p>
+        <label>
+          盲卡文件 `cards.round1.jsonl`
+          <input id="cardsFile" type="file" accept=".jsonl,.txt,application/json" />
+        </label>
+        <label>
+          标注模板 `annotations.round1.jsonl`
+          <input id="annotationsFile" type="file" accept=".jsonl,.txt,application/json" />
+        </label>
+        <button id="loadButton" type="button">开始标注</button>
+        <p class="error" id="loadError" role="alert"></p>
+      </section>
+
+      <section class="workspace" id="workspace" hidden>
+        <div class="toolbar">
+          <button id="previousButton" type="button">上一张</button>
+          <button id="nextIncompleteButton" type="button">下一张未完成</button>
+          <button id="nextButton" type="button">下一张</button>
+          <button id="exportButton" class="primary" type="button">导出当前标注</button>
+        </div>
+        <p class="completion-hint" id="completionHint" aria-live="polite"></p>
+
+        <article class="card">
+          <div class="card-heading">
+            <span id="samplePosition"></span>
+            <span class="section-badge" id="sectionBadge"></span>
+          </div>
+          <div id="lyricsLines" class="lyrics-lines"></div>
+        </article>
+
+        <section class="stanza-form">
+          <h2>整段判断</h2>
+          <div class="form-grid">
+            <label>句长模式
+              <select id="stanzaPattern">
+                <option value="">请选择</option>
+                <option value="near_equal">近似等长</option>
+                <option value="abab">ABAB 长短句</option>
+                <option value="aabb">AABB 长短句</option>
+                <option value="free">自由句长</option>
+                <option value="uncertain">不确定</option>
+              </select>
+            </label>
+            <label>文本节奏顺畅度
+              <select id="rhythmRating">
+                <option value="">请选择</option>
+                <option value="1">1 · 很不顺</option>
+                <option value="2">2 · 较不顺</option>
+                <option value="3">3 · 一般</option>
+                <option value="4">4 · 较顺</option>
+                <option value="5">5 · 很顺</option>
+              </select>
+            </label>
+            <label>判断信心
+              <select id="confidence">
+                <option value="">请选择</option>
+                <option value="high">高</option>
+                <option value="medium">中</option>
+                <option value="low">低</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input id="needsMelody" type="checkbox" />
+              必须结合旋律才能判断
+            </label>
+          </div>
+          <label>备注（可选）
+            <textarea id="stanzaNotes" rows="3" placeholder="记录边界情况或判断依据"></textarea>
+          </label>
+        </section>
+
+        <aside class="rubric">
+          <strong>逐行标签：</strong>
+          <span>0 = 自然，不需要修改</span>
+          <span>1 = 边界情况或可接受的风格选择</span>
+          <span>2 = 明显破坏段内节奏，应该修改</span>
+        </aside>
+        <p class="export-status" id="exportStatus" aria-live="polite"></p>
+      </section>
+    </main>
+    <script src="d9-4-annotator.js"></script>
+  </body>
+</html>

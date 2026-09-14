@@ -9,6 +9,7 @@ venv/
 
 # 模型权重与大数据
 data/ckpt/
+data/wheels/
 data/*.db
 data/*.jsonl
 
