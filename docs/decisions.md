@@ -520,3 +520,23 @@ Trance、Drum & Bass 当前仍使用固定版本 English Wikipedia 作为宽泛�
 ### 下一步
 
 先保留影子报告作为准入证据，再扩大固定查询集；只有完成生产 schema 设计、来源准入和检索对照后，才建立正式 `tools/rag/schemas.py` 与 production collection。
+
+## D10-023｜扩大固定查询 holdout，词面与 BGE 暂无差异
+
+- 日期：2026-09-16
+- 状态：v1.3 holdout 已完成；生产准入与路由未开启
+
+### 决策与实施
+
+- 新增 `style_fixed_queries.v1.3.json`，独立登记 20 条 q14～q33 查询，覆盖中文隐藏别名、查询扩展、人声/器乐属性和国风/Rap、动感舞曲的近邻表达。历史 v1/v1.1 与角色策略 v1.2 不改写。
+- embedding 评估脚本改为按 manifest 派生隔离 collection 名称，并读取 manifest 中的词面结果路径；不触碰生产 Chroma 或卡片状态。
+
+### 证据与解释
+
+- 词面与 BGE-small-zh-v1.5 均为 top-1 主卡 19/20（95%）、Top-3 预期召回 20/20（100%），来源追溯为真。
+- q31“国风 + 说唱”在两种检索中都不是稳定单一 top-1，属于组合歧义信号，应按多候选/组合查询处理；不得为了提高 top-1 而把某张卡标成唯一正确答案。
+- BGE 相对词面无指标提升，因此当前没有证据支持立即用 embedding 替换词面检索。该结论仅适用于本轮 17 张 draft 卡与 20 条登记查询，不外推生成质量或所有自然语言表达。
+
+### 边界与下一步
+
+v1.3 只作为不可变 holdout 证据；17 张卡仍为 `draft`，`approved=0`，不建立生产 collection，不改正式评分、制作 Agent 或路由。下一步先汇总各版本失败类型，再设计正式 schema 与 approved-only 索引；390 个韵脚候选精审及候选词 RAG 继续暂停。

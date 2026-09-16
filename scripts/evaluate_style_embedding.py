@@ -59,8 +59,9 @@ def _evaluate_embedding(
 
     collection_path.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(collection_path))
+    collection_name = f"style_{manifest['query_set_id'].replace('.', '_').replace('-', '_')}"
     collection = client.get_or_create_collection(
-        name="style_draft_v11",
+        name=collection_name,
         metadata={"hnsw:space": "cosine", "evaluation_only": True},
     )
     # upsert keeps rerunning the same isolated evaluation idempotent.
@@ -151,7 +152,10 @@ def main() -> None:
         "draft_card_count": sum(card.get("review_status") == "draft" for card in cards),
         "runtime": {"python": platform.python_version(), "chromadb": version("chromadb"), "sentence_transformers": version("sentence-transformers")},
         "lexical_baseline": {
-            "result_path": "data/output/evaluations/style-fixed-query-v1.1/result.json",
+            "result_path": manifest.get(
+                "lexical_result_path",
+                "data/output/evaluations/style-fixed-query-v1.1/result.json",
+            ),
             "top1_primary_accuracy": lexical["top1_primary_accuracy"],
             "top3_expected_recall": lexical["top3_expected_recall"],
             "mean_primary_reciprocal_rank": lexical["mean_primary_reciprocal_rank"],
