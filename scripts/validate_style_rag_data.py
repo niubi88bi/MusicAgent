@@ -6,14 +6,19 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 from pydantic import ValidationError
 
-from tools.rag.schemas import SourceRecord, StyleCard, production_admission
+from tools.rag.schemas import (
+    SourceAdmissionPolicy,
+    SourceRecord,
+    StyleCard,
+    production_admission,
+)
 
 
-ModelT = TypeVar("ModelT", SourceRecord, StyleCard)
+DEFAULT_ADMISSION_AUDIT_PATH = Path("data/miaoxiang/style_templates.v2.admission-audit.json")
 
 
 def _read_jsonl(path: Path) -> list[tuple[int, dict[str, Any]]]:
@@ -33,12 +38,30 @@ def _error_text(error: ValidationError) -> list[str]:
     return issues
 
 
-def validate_dataset(cards_path: Path, sources_path: Path) -> dict[str, Any]:
+def validate_dataset(
+    cards_path: Path,
+    sources_path: Path,
+    admission_audit_path: Path = DEFAULT_ADMISSION_AUDIT_PATH,
+) -> dict[str, Any]:
     source_rows = _read_jsonl(sources_path)
     card_rows = _read_jsonl(cards_path)
     source_models: dict[str, SourceRecord] = {}
     source_errors: list[dict[str, Any]] = []
     source_duplicates: list[str] = []
+    admission_policy_errors: list[str] = []
+    try:
+        audit_payload = json.loads(admission_audit_path.read_text(encoding="utf-8"))
+        admission_policy = SourceAdmissionPolicy.model_validate(
+            audit_payload["production_source_admission"]
+        )
+    except (OSError, KeyError, json.JSONDecodeError, ValidationError) as error:
+        admission_policy = SourceAdmissionPolicy(
+            schema_version="fallback",
+            default_status="blocked",
+            policy_note="准入审计缺失或无效时 fail-closed。",
+            cards={},
+        )
+        admission_policy_errors.append(type(error).__name__)
     for line_number, payload in source_rows:
         try:
             source = SourceRecord.model_validate(payload)
@@ -100,7 +123,18 @@ def validate_dataset(cards_path: Path, sources_path: Path) -> dict[str, Any]:
             warnings.append("numeric_tempo_should_have_tempo_usage_note")
         if card.evidence_depth == "supplemented_open_reference":
             warnings.append("supplemented_reference_requires_explicit_admission_review")
-        eligible, reasons = production_admission(card, source, contract_errors=errors)
+        source_admission = admission_policy.cards.get(card.id)
+        source_admission_status = (
+            source_admission.status
+            if source_admission is not None
+            else admission_policy.default_status
+        )
+        eligible, reasons = production_admission(
+            card,
+            source,
+            source_admission_status=source_admission_status,
+            contract_errors=errors,
+        )
         if card.card_role == "composite_query_template" and "not_a_direct_style_candidate" in reasons:
             warnings.append("composite_excluded_from_direct_candidates")
         for reason in reasons:
@@ -116,6 +150,7 @@ def validate_dataset(cards_path: Path, sources_path: Path) -> dict[str, Any]:
                 "card_role": card.card_role,
                 "retrieval_scope": card.retrieval_scope,
                 "source_id": card.source_id,
+                "source_admission_status": source_admission_status,
                 "production_eligible": eligible,
                 "production_block_reasons": reasons,
             }
@@ -138,13 +173,18 @@ def validate_dataset(cards_path: Path, sources_path: Path) -> dict[str, Any]:
         reason_counts["duplicate_source_id"] += len(source_duplicates)
     valid_card_results = [row for row in card_results if row["valid"]]
     eligible_ids = [row["card_id"] for row in card_results if row["production_eligible"]]
-    error_count = len(source_errors) + sum(len(row["errors"]) for row in card_results)
+    error_count = (
+        len(source_errors)
+        + len(admission_policy_errors)
+        + sum(len(row["errors"]) for row in card_results)
+    )
     error_count += len(card_duplicates) + len(source_duplicates)
     return {
         "validation_id": "style-rag-dry-run-v1",
         "validation_mode": "dry_run",
         "cards_path": str(cards_path),
         "sources_path": str(sources_path),
+        "admission_audit_path": str(admission_audit_path),
         "card_count": len(card_rows),
         "source_count": len(source_rows),
         "valid_card_count": len(valid_card_results),
@@ -156,6 +196,8 @@ def validate_dataset(cards_path: Path, sources_path: Path) -> dict[str, Any]:
         "duplicate_card_ids": sorted(set(card_duplicates)),
         "duplicate_source_ids": sorted(set(source_duplicates)),
         "source_errors": source_errors,
+        "admission_policy_errors": admission_policy_errors,
+        "source_admission_default_status": admission_policy.default_status,
         "card_results": card_results,
         "review_status_changed": False,
         "production_index_changed": False,
@@ -167,10 +209,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cards", type=Path, default=Path("data/miaoxiang/style_templates.v2.jsonl"))
     parser.add_argument("--sources", type=Path, default=Path("data/miaoxiang/source_catalog.jsonl"))
+    parser.add_argument("--admission-audit", type=Path, default=DEFAULT_ADMISSION_AUDIT_PATH)
     parser.add_argument("--out", type=Path, default=Path("data/output/evaluations/style-rag-dry-run-v1"))
     args = parser.parse_args()
 
-    report = validate_dataset(args.cards, args.sources)
+    report = validate_dataset(args.cards, args.sources, args.admission_audit)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "result.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",

@@ -578,3 +578,20 @@ v1.3 只作为不可变 holdout 证据；17 张卡仍为 `draft`，`approved=0`�
 ### 边界
 
 schema 通过不等于人工批准、来源生产准入或生成质量验证；Trance/Drum & Bass 的补充来源状态仍需单独审阅。下一步只能在人工批准并再次 dry-run 后实现 approved-only 索引构建，不自动写入 `approved`。
+
+## D10-026｜来源生产准入独立于内容审核，默认 fail-closed
+
+- 日期：2026-09-16
+- 状态：来源闸门与 BPM 使用说明已实现；所有卡仍仅限固定查询
+
+### 决策
+
+`review_status=approved` 只代表内容审核，不能同时代表外部来源允许进入生产派生索引。来源准入在 `style_templates.v2.admission-audit.json` 中单独记录：默认值为 `fixed_query_only`，只有逐卡显式改为 `production_derivative_allowed` 才通过来源闸门；准入审计缺失或无效时退化为 `blocked`。组合模板仍不得成为直接候选。
+
+### 数据说明
+
+为五张已有数值 BPM、但缺少使用边界的卡补充 `tempo_usage_note`。这些 BPM 只表示妙响指南中的风格参考范围，不证明 HeartMuLa 能稳定执行精确速度控制，也不改变卡片内容哈希范围。
+
+### 边界
+
+本决策没有批准任何风格卡，没有创建 production collection，也没有接入制作 Agent。Trance 与 Drum & Bass 的 Wikipedia 补充事实仍只允许固定查询；人工 keep、字段契约通过和检索指标通过都不会自动提升来源权限。

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from scripts.validate_style_rag_data import validate_dataset
 from tools.rag.schemas import (
+    SourceAdmissionPolicy,
     SourceRecord,
     StyleCard,
     StyleQueryManifest,
@@ -18,6 +19,7 @@ from tools.rag.schemas import (
 ROOT = Path(__file__).resolve().parents[1]
 CARDS_PATH = ROOT / "data/miaoxiang/style_templates.v2.jsonl"
 SOURCES_PATH = ROOT / "data/miaoxiang/source_catalog.jsonl"
+ADMISSION_AUDIT_PATH = ROOT / "data/miaoxiang/style_templates.v2.admission-audit.json"
 
 
 def _load_jsonl(path: Path) -> list[dict]:
@@ -39,6 +41,16 @@ class RagSchemaTests(unittest.TestCase):
         self.assertEqual(len(self.sources), 7)
         self.assertEqual(len(self.sources_by_id), 7)
 
+    def test_source_admission_policy_is_fail_closed(self) -> None:
+        payload = json.loads(ADMISSION_AUDIT_PATH.read_text(encoding="utf-8"))
+        policy = SourceAdmissionPolicy.model_validate(payload["production_source_admission"])
+        self.assertEqual(policy.default_status, "fixed_query_only")
+        self.assertEqual(policy.cards["style-edm-trance-v2"].status, "fixed_query_only")
+        self.assertEqual(
+            policy.cards["style-edm-drum-and-bass-v2"].status,
+            "fixed_query_only",
+        )
+
     def test_holdout_manifest_parse_and_query_labels(self) -> None:
         manifest_path = ROOT / "data/miaoxiang/style_fixed_queries.v1.3.json"
         manifest = StyleQueryManifest.model_validate(
@@ -54,16 +66,25 @@ class RagSchemaTests(unittest.TestCase):
         self.assertFalse(eligible)
         self.assertIn("review_status_not_approved", reasons)
         self.assertIn("not_a_direct_style_candidate", reasons)
+        self.assertIn("source_admission_not_granted", reasons)
 
     def test_draft_cards_are_not_production_eligible(self) -> None:
         for card in self.cards:
             eligible, reasons = production_admission(card, self.sources_by_id[card.source_id])
             self.assertFalse(eligible)
             self.assertIn("review_status_not_approved", reasons)
+            self.assertIn("source_admission_not_granted", reasons)
 
-    def test_approved_direct_card_can_be_eligible_in_memory(self) -> None:
+    def test_approved_direct_card_requires_explicit_source_admission(self) -> None:
         card = self.cards[0].model_copy(update={"review_status": "approved"})
         eligible, reasons = production_admission(card, self.sources_by_id[card.source_id])
+        self.assertFalse(eligible)
+        self.assertEqual(reasons, ["source_admission_not_granted"])
+        eligible, reasons = production_admission(
+            card,
+            self.sources_by_id[card.source_id],
+            source_admission_status="production_derivative_allowed",
+        )
         self.assertTrue(eligible)
         self.assertEqual(reasons, [])
 
@@ -89,6 +110,8 @@ class RagSchemaTests(unittest.TestCase):
         self.assertFalse(report["review_status_changed"])
         self.assertFalse(report["production_index_changed"])
         self.assertEqual(report["blocked_reason_counts"]["review_status_not_approved"], 17)
+        self.assertEqual(report["blocked_reason_counts"]["source_admission_not_granted"], 17)
+        self.assertEqual(report["source_admission_default_status"], "fixed_query_only")
 
     def test_dry_run_reports_unknown_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -100,6 +123,15 @@ class RagSchemaTests(unittest.TestCase):
         self.assertEqual(report["error_count"], 1)
         self.assertEqual(report["card_results"][0]["errors"], ["source_id_not_in_catalog"])
         self.assertFalse(report["card_results"][0]["production_eligible"])
+
+    def test_missing_admission_audit_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing_audit = Path(directory) / "missing-admission-audit.json"
+            report = validate_dataset(CARDS_PATH, SOURCES_PATH, missing_audit)
+        self.assertEqual(report["admission_policy_errors"], ["FileNotFoundError"])
+        self.assertEqual(report["source_admission_default_status"], "blocked")
+        self.assertEqual(report["production_eligible_count"], 0)
+        self.assertEqual(report["blocked_reason_counts"]["source_admission_not_granted"], 17)
 
 
 if __name__ == "__main__":

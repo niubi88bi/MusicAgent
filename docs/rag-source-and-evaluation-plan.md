@@ -201,6 +201,7 @@ retrieve_style_templates(
 
 - 所有记录通过 schema 校验，`id` 唯一，来源字段完整率 100%。
 - 正式索引只接收 `review_status=approved`。
+- `review_status=approved` 之外还必须有逐卡 `production_derivative_allowed` 来源授权；准入审计缺失、无效或未显式授权时 fail-closed。
 - 妙响风格卡必须能回溯到已核验的公开官方指南页面，且区分原文事实与项目整理内容。
 - 外部歌词库只有在许可先通过后才进入技术抽样；`ChineseLyrics` 当前因许可不明确直接排除，不进入正式索引。
 
@@ -258,13 +259,13 @@ retrieve_style_templates(
 2. **已实现候选清单**：已生成十三辙各 30 个、共 390 个韵脚候选。候选由项目按歌词句尾可用性整理，经固定 Jieba 快照、pypinyin 和现有十三辙映射校验；尚未进行人工主题、情绪、常用度和最终适用性审核，因此不是正式词库。
 3. **已完成来源排查**：`ChineseLyrics` 当前无明确再利用许可，正式索引不采用；Jieba 只承担候选收录核验，不把其源频次冒充歌词频率。
 4. **已完成必要性审计**：24 份无 RAG 新主题草稿中，16 份押韵分达到 70，双候选机制让 10/12 个主题至少有一份押韵达标稿；但目标辙行命中率只有 64.8%，并出现把言前、乜斜、人辰误称为中东辙的明确错误。当前证据支持先补确定性辙部说明，不支持首稿默认注入韵脚词。
-5. **待完成**：固定查询、BGE/Chroma 隔离对照、近邻人工复核、本轮影子语义修订、逐卡审核包生成、17 张卡人工结论、6 张 revise 卡最小修订、影子字段契约检查和 v1.3 扩展 holdout 已完成；11 张 keep 卡内容未改。v1.3 的词面与 BGE 指标均为 19/20 top-1、20/20 top-3，q31 作为组合歧义保留。影子契约 17 张卡错误数为 0，但正式 `tools/rag/schemas.py` 尚未实现，仍需先汇总失败类型再决定生产 schema、approved-only 索引和多候选策略；组合模板和人声属性策略仍未接入生产，`approved` 尚为 0；韵脚路线已完成必要性与 section-consistency 检查，390 词审核及候选词 RAG 继续暂停。
+5. **待完成**：固定查询、BGE/Chroma 隔离对照、近邻人工复核、逐卡审核、6 张 revise 卡修订、v1.3 holdout、正式 schema、dry-run 和来源 fail-closed 闸门已完成。正式校验为 17 张有效、错误 0、警告 3、生产可入库 0；内容 `approved` 与来源 `production_derivative_allowed` 必须同时满足，但当前两者均为 0。production collection、多候选运行时策略和 Agent 接入仍未实现；韵脚路线已完成必要性与 section-consistency 检查，390 词审核及候选词 RAG 继续暂停。
 
 下一步不先精审全部 390 词。风格卡先完成用户内容确认和固定查询设计，再决定是否安装检索依赖；候选数据通过结构检查、AI 审计或来源补证都不等于 RAG 效果已验证。
 
-### 9.1 正式 schema 最小草案（待确认，不是实现）
+### 9.1 正式 schema 与来源准入语义（已实现校验，尚未建生产索引）
 
-本节只把当前影子契约整理为可审查的生产候选，不改变 JSONL、`review_status`、索引或 Agent 行为。正式实现前仍需确认以下准入语义。
+本节最初用于整理影子契约；当前 `tools/rag/schemas.py` 与只读 dry-run 已实现，但仍不改变 JSONL、`review_status`、索引或 Agent 行为。
 
 #### 对象边界
 
@@ -291,8 +292,11 @@ and card_role == "style_card"
 and retrieval_scope == "direct_candidate"
 and source_id 可解析且来源 verification_status == "verified_readable"
 and 影子/正式 schema 错误数 == 0
+and production_source_admission == "production_derivative_allowed"
 and 许可用途允许保存当前派生字段，且未保存受限原文
 ```
+
+来源权限与内容审核分离：审计默认是 `fixed_query_only`，只有逐卡显式授权才允许生产派生索引；审计文件缺失或结构无效时按 `blocked` 处理。当前 17 张卡均未获得该授权。
 
 组合模板仍可作为查询扩展输入，但不计入直接候选准入数量。用户表达包含明确说唱/纯器乐等约束时，运行时可使用属性过滤；表达只有“国风”“浩室”等宽泛词时，默认保留多候选并返回区分依据。
 

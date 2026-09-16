@@ -57,6 +57,25 @@ class SupplementalSource(_StrictModel):
     changes: str = Field(min_length=1)
 
 
+SourceAdmissionStatus = Literal[
+    "fixed_query_only",
+    "production_derivative_allowed",
+    "blocked",
+]
+
+
+class SourceAdmissionDecision(_StrictModel):
+    status: SourceAdmissionStatus
+    reason: str = Field(min_length=1)
+
+
+class SourceAdmissionPolicy(_StrictModel):
+    schema_version: str = Field(min_length=1)
+    default_status: SourceAdmissionStatus
+    policy_note: str = Field(min_length=1)
+    cards: dict[str, SourceAdmissionDecision] = Field(default_factory=dict)
+
+
 class StyleCard(_StrictModel):
     id: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
@@ -180,6 +199,7 @@ def production_admission(
     card: StyleCard,
     source: SourceRecord | None,
     *,
+    source_admission_status: SourceAdmissionStatus = "fixed_query_only",
     contract_errors: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Return the production-index decision without mutating either record."""
@@ -189,6 +209,8 @@ def production_admission(
         reasons.append("review_status_not_approved")
     if card.card_role != "style_card" or card.retrieval_scope != "direct_candidate":
         reasons.append("not_a_direct_style_candidate")
+    if source_admission_status != "production_derivative_allowed":
+        reasons.append("source_admission_not_granted")
     if source is None:
         reasons.append("source_not_resolved")
     else:
