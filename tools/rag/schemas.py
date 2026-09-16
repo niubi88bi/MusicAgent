@@ -57,9 +57,13 @@ class SupplementalSource(_StrictModel):
     changes: str = Field(min_length=1)
 
 
+SourceUseScope = Literal["local_demo", "public_product"]
+
+
 SourceAdmissionStatus = Literal[
-    "fixed_query_only",
-    "production_derivative_allowed",
+    "evaluation_only",
+    "local_demo_allowed",
+    "public_product_allowed",
     "blocked",
 ]
 
@@ -199,18 +203,24 @@ def production_admission(
     card: StyleCard,
     source: SourceRecord | None,
     *,
-    source_admission_status: SourceAdmissionStatus = "fixed_query_only",
+    source_admission_status: SourceAdmissionStatus = "evaluation_only",
+    requested_scope: SourceUseScope = "public_product",
     contract_errors: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
-    """Return the production-index decision without mutating either record."""
+    """Return a scope-specific index decision without mutating either record."""
 
     reasons = list(contract_errors or [])
     if card.review_status != "approved":
         reasons.append("review_status_not_approved")
     if card.card_role != "style_card" or card.retrieval_scope != "direct_candidate":
         reasons.append("not_a_direct_style_candidate")
-    if source_admission_status != "production_derivative_allowed":
-        reasons.append("source_admission_not_granted")
+    status_allows_scope = (
+        source_admission_status in {"local_demo_allowed", "public_product_allowed"}
+        if requested_scope == "local_demo"
+        else source_admission_status == "public_product_allowed"
+    )
+    if not status_allows_scope:
+        reasons.append(f"source_admission_not_granted_for_{requested_scope}")
     if source is None:
         reasons.append("source_not_resolved")
     else:

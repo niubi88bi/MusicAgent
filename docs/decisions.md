@@ -579,7 +579,7 @@ v1.3 只作为不可变 holdout 证据；17 张卡仍为 `draft`，`approved=0`�
 
 schema 通过不等于人工批准、来源生产准入或生成质量验证；Trance/Drum & Bass 的补充来源状态仍需单独审阅。下一步只能在人工批准并再次 dry-run 后实现 approved-only 索引构建，不自动写入 `approved`。
 
-## D10-026｜来源生产准入独立于内容审核，默认 fail-closed
+## D10-026｜来源生产准入独立于内容审核，默认 fail-closed（已由 D10-027 细分）
 
 - 日期：2026-09-16
 - 状态：来源闸门与 BPM 使用说明已实现；所有卡仍仅限固定查询
@@ -595,3 +595,16 @@ schema 通过不等于人工批准、来源生产准入或生成质量验证；T
 ### 边界
 
 本决策没有批准任何风格卡，没有创建 production collection，也没有接入制作 Agent。Trance 与 Drum & Bass 的 Wikipedia 补充事实仍只允许固定查询；人工 keep、字段契约通过和检索指标通过都不会自动提升来源权限。
+
+## D10-027｜按本地演示与公开产品细分来源使用范围
+
+- 日期：2026-09-16
+- 状态：四级范围 schema、双范围 dry-run 与人工审核包已实现；决定均未填写
+
+### 决策
+
+用 `evaluation_only`、`local_demo_allowed`、`public_product_allowed`、`blocked` 替代笼统的两档来源状态。本地演示允许后两种授权，公开产品只允许 `public_product_allowed`；默认 `evaluation_only`，审计缺失或无效时 `blocked`。内容 keep/approved 与来源范围继续保持独立。
+
+### 原因与边界
+
+本地求职演示与公开产品的使用风险不同，不能用一个 `production_derivative_allowed` 混合表达。审核包只汇总来源目录、卡片派生内容和许可提示，不构成法律意见；所有人工决定初始为空。Wikipedia 补充来源继续保留固定版本、署名、修改说明及 CC BY-SA 4.0 提示；腾讯文档只作字段设计参考。

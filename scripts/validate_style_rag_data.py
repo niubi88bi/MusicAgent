@@ -52,7 +52,7 @@ def validate_dataset(
     try:
         audit_payload = json.loads(admission_audit_path.read_text(encoding="utf-8"))
         admission_policy = SourceAdmissionPolicy.model_validate(
-            audit_payload["production_source_admission"]
+            audit_payload["source_use_admission"]
         )
     except (OSError, KeyError, json.JSONDecodeError, ValidationError) as error:
         admission_policy = SourceAdmissionPolicy(
@@ -89,8 +89,10 @@ def validate_dataset(
                     "valid": False,
                     "errors": issues,
                     "warnings": [],
-                    "production_eligible": False,
-                    "production_block_reasons": ["schema_validation_error"],
+                    "local_demo_eligible": False,
+                    "local_demo_block_reasons": ["schema_validation_error"],
+                    "public_product_eligible": False,
+                    "public_product_block_reasons": ["schema_validation_error"],
                 }
             )
             reason_counts["schema_validation_error"] += 1
@@ -129,16 +131,29 @@ def validate_dataset(
             if source_admission is not None
             else admission_policy.default_status
         )
-        eligible, reasons = production_admission(
+        local_demo_eligible, local_demo_reasons = production_admission(
             card,
             source,
             source_admission_status=source_admission_status,
+            requested_scope="local_demo",
             contract_errors=errors,
         )
-        if card.card_role == "composite_query_template" and "not_a_direct_style_candidate" in reasons:
+        public_product_eligible, public_product_reasons = production_admission(
+            card,
+            source,
+            source_admission_status=source_admission_status,
+            requested_scope="public_product",
+            contract_errors=errors,
+        )
+        if (
+            card.card_role == "composite_query_template"
+            and "not_a_direct_style_candidate" in local_demo_reasons
+        ):
             warnings.append("composite_excluded_from_direct_candidates")
-        for reason in reasons:
-            reason_counts[reason] += 1
+        for reason in local_demo_reasons:
+            reason_counts[f"local_demo:{reason}"] += 1
+        for reason in public_product_reasons:
+            reason_counts[f"public_product:{reason}"] += 1
         card_results.append(
             {
                 "line": line_number,
@@ -151,8 +166,10 @@ def validate_dataset(
                 "retrieval_scope": card.retrieval_scope,
                 "source_id": card.source_id,
                 "source_admission_status": source_admission_status,
-                "production_eligible": eligible,
-                "production_block_reasons": reasons,
+                "local_demo_eligible": local_demo_eligible,
+                "local_demo_block_reasons": local_demo_reasons,
+                "public_product_eligible": public_product_eligible,
+                "public_product_block_reasons": public_product_reasons,
             }
         )
 
@@ -161,18 +178,26 @@ def validate_dataset(
         duplicate_set = set(card_duplicates)
         for row in card_results:
             if row["card_id"] in duplicate_set:
-                if row["production_eligible"]:
-                    row["production_eligible"] = False
-                row["production_block_reasons"].append("duplicate_card_id")
+                row["local_demo_eligible"] = False
+                row["public_product_eligible"] = False
+                row["local_demo_block_reasons"].append("duplicate_card_id")
+                row["public_product_block_reasons"].append("duplicate_card_id")
     if source_duplicates:
         duplicate_source_set = set(source_duplicates)
         for row in card_results:
             if row.get("source_id") in duplicate_source_set:
-                row["production_eligible"] = False
-                row["production_block_reasons"].append("duplicate_source_id")
+                row["local_demo_eligible"] = False
+                row["public_product_eligible"] = False
+                row["local_demo_block_reasons"].append("duplicate_source_id")
+                row["public_product_block_reasons"].append("duplicate_source_id")
         reason_counts["duplicate_source_id"] += len(source_duplicates)
     valid_card_results = [row for row in card_results if row["valid"]]
-    eligible_ids = [row["card_id"] for row in card_results if row["production_eligible"]]
+    local_demo_eligible_ids = [
+        row["card_id"] for row in card_results if row["local_demo_eligible"]
+    ]
+    public_product_eligible_ids = [
+        row["card_id"] for row in card_results if row["public_product_eligible"]
+    ]
     error_count = (
         len(source_errors)
         + len(admission_policy_errors)
@@ -190,8 +215,10 @@ def validate_dataset(
         "valid_card_count": len(valid_card_results),
         "error_count": error_count,
         "warning_count": sum(len(row["warnings"]) for row in card_results),
-        "production_eligible_count": len(eligible_ids),
-        "production_eligible_card_ids": eligible_ids,
+        "local_demo_eligible_count": len(local_demo_eligible_ids),
+        "local_demo_eligible_card_ids": local_demo_eligible_ids,
+        "public_product_eligible_count": len(public_product_eligible_ids),
+        "public_product_eligible_card_ids": public_product_eligible_ids,
         "blocked_reason_counts": dict(sorted(reason_counts.items())),
         "duplicate_card_ids": sorted(set(card_duplicates)),
         "duplicate_source_ids": sorted(set(source_duplicates)),
@@ -201,7 +228,7 @@ def validate_dataset(
         "card_results": card_results,
         "review_status_changed": False,
         "production_index_changed": False,
-        "interpretation": "dry-run 只验证数据契约和准入条件，不修改卡片状态或创建 production collection。",
+        "interpretation": "dry-run 分别验证本地演示与公开产品准入，不修改卡片状态或创建 collection。",
     }
 
 
@@ -222,7 +249,8 @@ def main() -> None:
     print(json.dumps({key: report[key] for key in (
         "validation_id", "validation_mode", "card_count", "source_count",
         "valid_card_count", "error_count", "warning_count",
-        "production_eligible_count", "review_status_changed",
+        "local_demo_eligible_count", "public_product_eligible_count",
+        "review_status_changed",
         "production_index_changed",
     )}, ensure_ascii=False, indent=2))
     print(json.dumps(report["blocked_reason_counts"], ensure_ascii=False, indent=2))
