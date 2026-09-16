@@ -22,38 +22,61 @@ def _normalise(value: str) -> str:
     return re.sub(r"\s+", "", value).lower()
 
 
-def _card_blob(card: dict[str, Any]) -> tuple[str, set[str]]:
-    """Return searchable text and high-value exact retrieval aliases."""
+def _card_blob(card: dict[str, Any]) -> tuple[str, dict[str, int]]:
+    """Return searchable text and deterministic weights for term classes.
+
+    Core style terms and subgenres are strongest. Hidden aliases are useful for
+    recall but must not outrank a named style; query-expansion terms are weaker,
+    and scene tags are context-only (zero style score).
+    """
     fields = (
         "id", "genre", "subgenres", "moods", "instruments", "melody",
         "dynamics", "structure_notes", "summary", "prompt_template",
-        "retrieval_terms", "hidden_retrieval_aliases", "backend_tags",
+        "retrieval_terms", "hidden_retrieval_aliases", "query_expansion_terms",
+        "scene_tags", "backend_tags",
     )
     values: list[str] = []
-    exact_terms: set[str] = set()
+    term_weights: dict[str, int] = {}
     for field in fields:
         value = card.get(field)
         if isinstance(value, list):
             values.extend(str(item) for item in value)
-            if field in {"retrieval_terms", "hidden_retrieval_aliases", "subgenres"}:
-                exact_terms.update(_normalise(str(item)) for item in value)
+            if field in {"retrieval_terms", "subgenres"}:
+                for item in value:
+                    term_weights[_normalise(str(item))] = max(
+                        term_weights.get(_normalise(str(item)), 0), 4
+                    )
+            elif field == "hidden_retrieval_aliases":
+                for item in value:
+                    token = _normalise(str(item))
+                    term_weights[token] = max(term_weights.get(token, 0), 2)
+            elif field == "query_expansion_terms":
+                for item in value:
+                    token = _normalise(str(item))
+                    term_weights[token] = max(term_weights.get(token, 0), 1)
+            elif field == "scene_tags":
+                for item in value:
+                    token = _normalise(str(item))
+                    term_weights.setdefault(token, 0)
         elif isinstance(value, dict):
             values.extend(str(item) for item in value.values())
         elif value is not None:
             values.append(str(value))
-    return _normalise(" ".join(values)), exact_terms
+    return _normalise(" ".join(values)), term_weights
 
 
 def _score(query: dict[str, Any], card: dict[str, Any]) -> tuple[int, list[str]]:
-    blob, exact_terms = _card_blob(card)
+    blob, term_weights = _card_blob(card)
     score = 0
     matched: list[str] = []
     for keyword in query["keywords"]:
         token = _normalise(keyword)
         if not token or token not in blob:
             continue
-        matched.append(keyword)
-        score += 4 if token in exact_terms else 1
+        weight = term_weights.get(token, 1)
+        if weight > 0:
+            matched.append(keyword)
+            score += weight
     return score, matched
 
 

@@ -412,3 +412,92 @@ Trance、Drum & Bass 当前仍使用固定版本 English Wikipedia 作为宽泛�
 ### 下一步边界
 
 保留 v1 manifest 和结果作为不可变历史基线，v1.1 作为修订登记版本；之后才考虑安装 ChromaDB/BGE 做 embedding 对照。未完成人工内容准入和向量对照前，不把卡片改为 `approved`，不接入制作 Agent。
+
+## D10-017｜Embedding 只做隔离对照，当前不因平局接入生产
+
+- 日期：2026-09-14
+- 状态：隔离对照完成；生产 RAG 仍未准入
+
+### 实际验证
+
+- 在 D 盘缓存 `BAAI/bge-small-zh-v1.5`，使用 512 维向量和独立 Chroma collection `style_draft_v11` 对 v1.1 的 8 组查询进行排序。
+- embedding 的 top-1 主卡命中 8/8、top-3 相关候选命中 8/8、top-3 来源追溯率 100%，与词面基线完全相同。
+- 本轮只覆盖 8 组人工登记查询，不能证明自然语言泛化、音乐生成质量或 HeartMuLa 跟随效果；隔离 collection 不是正式索引。
+
+### 决策
+
+当前没有证据证明 embedding 比轻量词面检索更有价值，因此不扩大风格数据、不把草稿卡改为 `approved`，也不接入制作 Agent。下一步优先做近邻误召回复核和人工逐卡内容准入；若后续验证仍无增益，可保留词面检索作为低成本路径。
+
+## D10-018｜近邻误召回先形成待人工复核包，不自动批准风格卡
+
+- 日期：2026-09-14
+- 状态：复核包已生成；人工决定待填写
+
+### 决策
+
+根据 BGE 隔离对照的 Top-3 结果，建立 4 个近邻组：中文动感舞曲、Deep/Tropical House、高速或旋律型 EDM、国风与中文 Rap。复核包保留每张卡的摘要、检索词、来源和当前 `draft` 状态，并记录观察到的查询邻居。
+
+复核只允许人工填写 `keep`、`revise` 或 `hold_for_source`；空白保持 `null`，不能把 Top-1 命中率直接当作内容准入。该包不修改卡片、不修改来源目录、不构建生产索引。
+
+### 产物与下一步
+
+- `data/output/evaluations/style-near-neighbor-review-v1/review_packet.json`
+- 新增 `scripts/prepare_style_near_neighbor_review.py` 和对应离线测试。
+- 下一步由人工逐组判断近邻边界和来源充分性；完成后才讨论哪些卡可从 `draft` 进入 `approved`。
+
+## D10-019｜组合模板降级与中文人声属性显式化
+
+- 日期：2026-09-16
+- 状态：语义修订与影子策略已实现；生产路由未接入
+
+### 人工复核结论
+
+用户对 4 个近邻组完成内容与边界判断：`dynamic_chinese_club=revise`、`house_pair=keep`、`edm_energy_cluster=keep`、`chinese_voice_and_rap=revise`。该结果是 1 名评审者的人工内容复核，不等于普遍质量证明；所有卡仍保持 `draft`。
+
+### 实施取舍
+
+- `style-dynamic-sad-folk-pop-remix-v2` 不拆成新卡，改为 `card_role=composite_query_template`、`retrieval_scope=query_expansion_only`，只扩展用户查询并生成独立风格候选，不参与普通风格卡直接竞争。
+- 国风与 Rap 七张卡增加 `vocal_type`、`rap_default`、`instrumental_default`、`default_language`，把说唱、纯器乐和默认中文语种从摘要中的隐含信息改为结构化影子字段。
+- 新增 v1.2 影子查询：明确说唱时提升 Rap 卡，明确纯音乐时提升 Ambient/器乐卡，只说“国风”时限定在国风家族并保留多候选。
+
+### 验收边界
+
+影子策略只验证角色过滤和候选排序，不改变正式解析器、评分、制作 Agent 或生产索引。组合模板仍可作为查询扩展证据，但不能被标记为独立风格卡 `approved`；新增字段是项目派生字段，不冒充妙响官方原始字段。
+
+## D10-020｜先生成逐卡准入审核包，不直接批准草稿卡
+
+- 日期：2026-09-16
+- 状态：逐卡审核包已生成；人工决策待填写
+
+### 决策
+
+四组近邻判断完成后，下一步改为逐卡而不是逐组准入。审核包必须同时展示来源许可证边界、卡片角色、直接候选资格、检索词、人声/说唱/纯器乐字段、BGE 近邻和影子策略观察；人工决策只允许 `keep`、`revise` 或 `hold_for_source`。`approved` 仍不是本包的可填写状态。
+
+### 产物与边界
+
+- `data/output/evaluations/style-card-admission-review-v1-20260916/review_packet.json`
+- `data/output/evaluations/style-card-admission-review-v1-20260916/review_packet.md`
+- 新增 `scripts/prepare_style_card_admission_review.py` 与对应离线测试。
+- 17 张卡全部覆盖且来源可解析；组合模板明确不是直接候选；人工决策字段保持 `null`。
+- 本包只整理证据，不写回 `style_templates.v2.jsonl`，不改变 `review_status`，不创建生产索引。
+
+### 下一步
+
+先由人工逐卡填写审核结论，再对 `revise` 卡做最小修改并重跑来源、字段和查询检查；完成前不接入生产 RAG、不改 Agent 路由，也不启动 390 个韵脚候选的精审。
+
+## D10-021｜按逐卡结论最小修订字段与词面权重
+
+- 日期：2026-09-16
+- 状态：6 张 revise 卡已修订并完成回归；11 张 keep 卡内容未改；生产准入仍未开启
+
+### 决策与实施
+
+- Vina House、Chinese Bounce、Sad Slap House 补齐中文人声/语言字段；短视频词移入 `scene_tags`，`Emotional Remix` 降为 `query_expansion_terms`。
+- Techno 补齐纯器乐/短促失真人声属性和“科技舞曲/工业电子”中文检索词；Future Bass 补齐人声切片属性；相关 BPM 摘要明确为参考范围。
+- 禅意国风 Ambient 统一为 `instrumental_default=true`、`vocal_type=optional_humming`，表示纯器乐默认、哼鸣可选。
+- 词面基线采用四级语义：核心风格词/子风格 4 分，隐藏别名 2 分，查询扩展 1 分，场景标签 0 分；目标是防止场景词或别名压过主风格词。该权重目前只用于离线影子/基线验证。
+- 用户的 17 张逐卡结论写入审计；其中 Trance 与 Drum & Bass 的人工内容结论为 keep，来源状态保留为 `supplemented_ready_for_fixed_query`，但不因此变为 approved。
+
+### 边界
+
+本轮仍不修改正式评分、制作 Agent、生产路由或 `approved` 状态。字段值为项目派生语义，不是外部来源原始标签；HeartMuLa 跟随状态继续为 `unverified`。
