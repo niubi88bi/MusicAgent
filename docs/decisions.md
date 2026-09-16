@@ -501,3 +501,22 @@ Trance、Drum & Bass 当前仍使用固定版本 English Wikipedia 作为宽泛�
 ### 边界
 
 本轮仍不修改正式评分、制作 Agent、生产路由或 `approved` 状态。字段值为项目派生语义，不是外部来源原始标签；HeartMuLa 跟随状态继续为 `unverified`。
+
+## D10-022｜先用影子契约检查新增字段，暂不实现生产 schema
+
+- 日期：2026-09-16
+- 状态：影子契约通过；正式 `tools/rag/schemas.py` 尚未实现
+
+### 验证结果
+
+- 新增 `scripts/validate_style_template_contract.py`，检查必填字段、来源引用、内容哈希、角色/检索范围、人声属性、词类分层、BPM 空值和 HeartMuLa 未验证边界。
+- 17 张卡、7 条来源通过检查，错误数为 0；报告保留 5 条非阻塞警告，均是既有 keep 卡的数值 BPM 尚未补 `tempo_usage_note`。
+- 组合模板的 `query_expansion_only` 约束、6 张 revise 卡的完整人声字段和 17 张 `draft` 状态均通过。
+
+### 决策
+
+当前项目没有正式 `tools/rag/schemas.py` 或生产索引实现，因此本次报告只证明草稿数据满足影子契约，不证明生产 schema 已兼容。警告不自动修改 keep 卡；是否在正式 schema 中要求所有非空 BPM 都有 `tempo_usage_note`，留到下一轮 schema 设计时决定。
+
+### 下一步
+
+先保留影子报告作为准入证据，再扩大固定查询集；只有完成生产 schema 设计、来源准入和检索对照后，才建立正式 `tools/rag/schemas.py` 与 production collection。
