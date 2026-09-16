@@ -77,6 +77,7 @@ class SourceAdmissionPolicy(_StrictModel):
     schema_version: str = Field(min_length=1)
     default_status: SourceAdmissionStatus
     policy_note: str = Field(min_length=1)
+    sources: dict[str, SourceAdmissionDecision] = Field(default_factory=dict)
     cards: dict[str, SourceAdmissionDecision] = Field(default_factory=dict)
 
 
@@ -203,7 +204,8 @@ def production_admission(
     card: StyleCard,
     source: SourceRecord | None,
     *,
-    source_admission_status: SourceAdmissionStatus = "evaluation_only",
+    source_admission_statuses: list[SourceAdmissionStatus] | None = None,
+    card_admission_status: SourceAdmissionStatus = "evaluation_only",
     requested_scope: SourceUseScope = "public_product",
     contract_errors: list[str] | None = None,
 ) -> tuple[bool, list[str]]:
@@ -214,13 +216,16 @@ def production_admission(
         reasons.append("review_status_not_approved")
     if card.card_role != "style_card" or card.retrieval_scope != "direct_candidate":
         reasons.append("not_a_direct_style_candidate")
-    status_allows_scope = (
-        source_admission_status in {"local_demo_allowed", "public_product_allowed"}
-        if requested_scope == "local_demo"
-        else source_admission_status == "public_product_allowed"
-    )
-    if not status_allows_scope:
+    def status_allows_scope(status: SourceAdmissionStatus) -> bool:
+        if requested_scope == "local_demo":
+            return status in {"local_demo_allowed", "public_product_allowed"}
+        return status == "public_product_allowed"
+
+    effective_source_statuses = source_admission_statuses or ["evaluation_only"]
+    if not all(status_allows_scope(status) for status in effective_source_statuses):
         reasons.append(f"source_admission_not_granted_for_{requested_scope}")
+    if not status_allows_scope(card_admission_status):
+        reasons.append(f"card_admission_not_granted_for_{requested_scope}")
     if source is None:
         reasons.append("source_not_resolved")
     else:

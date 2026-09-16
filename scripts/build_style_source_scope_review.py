@@ -12,7 +12,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from tools.rag.schemas import SourceRecord, StyleCard
+from tools.rag.schemas import (
+    SourceAdmissionPolicy,
+    SourceRecord,
+    StyleCard,
+    production_admission,
+)
 
 
 DEFAULT_CARDS_PATH = Path("data/miaoxiang/style_templates.v2.jsonl")
@@ -41,6 +46,7 @@ def build_review_packet(
     cards = [StyleCard.model_validate(row) for row in _read_jsonl(cards_path)]
     sources = [SourceRecord.model_validate(row) for row in _read_jsonl(sources_path)]
     audit = json.loads(admission_audit_path.read_text(encoding="utf-8"))
+    admission_policy = SourceAdmissionPolicy.model_validate(audit["source_use_admission"])
     content_decisions = {
         row["card_id"]: row["decision"]
         for row in audit.get("human_card_review", {}).get("cards", [])
@@ -65,6 +71,7 @@ def build_review_packet(
     source_reviews: list[dict[str, Any]] = []
     for source in sources:
         is_share_alike = source.license_status == "CC-BY-SA-4.0"
+        source_decision = admission_policy.sources.get(source.source_id)
         source_reviews.append(
             {
                 "source_id": source.source_id,
@@ -96,13 +103,44 @@ def build_review_packet(
                 "share_alike_required": is_share_alike,
                 "supplemental_attribution_records": supplemental_details[source.source_id],
                 "non_binding_recommended_scope": "evaluation_only",
-                "decision": None,
+                "decision": source_decision.status if source_decision else None,
+                "decision_reason": source_decision.reason if source_decision else "",
                 "review_notes": "",
             }
         )
 
+    sources_by_id = {source.source_id: source for source in sources}
     card_reviews: list[dict[str, Any]] = []
     for card in cards:
+        related_source_ids = [card.source_id] + [
+            source.source_id for source in card.supplemental_sources
+        ]
+        source_statuses = [
+            (
+                admission_policy.sources[source_id].status
+                if source_id in admission_policy.sources
+                else admission_policy.default_status
+            )
+            for source_id in related_source_ids
+        ]
+        card_decision = admission_policy.cards.get(card.id)
+        card_status = (
+            card_decision.status if card_decision else admission_policy.default_status
+        )
+        local_demo_eligible, _ = production_admission(
+            card,
+            sources_by_id.get(card.source_id),
+            source_admission_statuses=source_statuses,
+            card_admission_status=card_status,
+            requested_scope="local_demo",
+        )
+        public_product_eligible, _ = production_admission(
+            card,
+            sources_by_id.get(card.source_id),
+            source_admission_statuses=source_statuses,
+            card_admission_status=card_status,
+            requested_scope="public_product",
+        )
         card_reviews.append(
             {
                 "card_id": card.id,
@@ -121,7 +159,10 @@ def build_review_packet(
                 ],
                 "backend_validation": card.backend_validation.heartmula_local,
                 "non_binding_recommended_scope": "evaluation_only",
-                "decision": None,
+                "decision": card_decision.status if card_decision else None,
+                "decision_reason": card_decision.reason if card_decision else "",
+                "local_demo_eligible": local_demo_eligible,
+                "public_product_eligible": public_product_eligible,
                 "review_notes": "",
             }
         )
@@ -147,8 +188,12 @@ def build_review_packet(
                 row["decision"] is None for row in source_reviews
             ),
             "card_decisions_pending": sum(row["decision"] is None for row in card_reviews),
-            "local_demo_eligible_count": 0,
-            "public_product_eligible_count": 0,
+            "local_demo_eligible_count": sum(
+                row["local_demo_eligible"] for row in card_reviews
+            ),
+            "public_product_eligible_count": sum(
+                row["public_product_eligible"] for row in card_reviews
+            ),
             "review_status_changed": False,
             "index_changed": False,
         },
@@ -170,9 +215,10 @@ def render_markdown(packet: dict[str, Any]) -> str:
     ]
     for row in packet["source_reviews"]:
         linked_count = len(row["primary_card_ids"]) + len(row["supplemental_card_ids"])
+        decision = row["decision"] or "待填写"
         lines.append(
             f"| `{row['source_id']}` | {row['license_status']} | {linked_count} | "
-            f"{row['non_binding_recommended_scope']} | 待填写 |"
+            f"{row['non_binding_recommended_scope']} | {decision} |"
         )
     lines.extend(
         [
@@ -184,10 +230,11 @@ def render_markdown(packet: dict[str, Any]) -> str:
         ]
     )
     for row in packet["card_reviews"]:
+        decision = row["decision"] or "待填写"
         lines.append(
             f"| `{row['card_id']}` | {row['content_review_decision']} | "
             f"`{row['primary_source_id']}` | {row['card_role']} | "
-            f"{row['non_binding_recommended_scope']} | 待填写 |"
+            f"{row['non_binding_recommended_scope']} | {decision} |"
         )
     lines.extend(
         [

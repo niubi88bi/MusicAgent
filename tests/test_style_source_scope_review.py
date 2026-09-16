@@ -18,16 +18,20 @@ class StyleSourceScopeReviewTests(unittest.TestCase):
             DEFAULT_ADMISSION_AUDIT_PATH,
         )
 
-    def test_packet_covers_all_sources_and_cards_with_pending_decisions(self) -> None:
+    def test_packet_covers_all_sources_and_cards_with_local_demo_decisions(self) -> None:
         self.assertEqual(self.packet["summary"]["source_count"], 7)
         self.assertEqual(self.packet["summary"]["card_count"], 17)
-        self.assertEqual(self.packet["summary"]["source_decisions_pending"], 7)
-        self.assertEqual(self.packet["summary"]["card_decisions_pending"], 17)
-        self.assertTrue(all(row["decision"] is None for row in self.packet["source_reviews"]))
-        self.assertTrue(all(row["decision"] is None for row in self.packet["card_reviews"]))
+        self.assertEqual(self.packet["summary"]["source_decisions_pending"], 0)
+        self.assertEqual(self.packet["summary"]["card_decisions_pending"], 0)
+        self.assertTrue(
+            all(row["decision"] == "local_demo_allowed" for row in self.packet["source_reviews"])
+        )
+        self.assertTrue(
+            all(row["decision"] == "local_demo_allowed" for row in self.packet["card_reviews"])
+        )
 
-    def test_packet_does_not_admit_local_or_public_scope(self) -> None:
-        self.assertEqual(self.packet["summary"]["local_demo_eligible_count"], 0)
+    def test_packet_admits_direct_cards_only_for_local_demo(self) -> None:
+        self.assertEqual(self.packet["summary"]["local_demo_eligible_count"], 16)
         self.assertEqual(self.packet["summary"]["public_product_eligible_count"], 0)
         self.assertFalse(self.packet["summary"]["review_status_changed"])
         self.assertFalse(self.packet["summary"]["index_changed"])
@@ -57,10 +61,11 @@ class StyleSourceScopeReviewTests(unittest.TestCase):
         self.assertEqual(source["primary_card_ids"], [])
         self.assertEqual(source["supplemental_card_ids"], [])
 
-    def test_markdown_marks_every_decision_pending(self) -> None:
+    def test_markdown_records_local_demo_decisions(self) -> None:
         markdown = render_markdown(self.packet)
         self.assertIn("不构成法律意见", markdown)
-        self.assertEqual(markdown.count("待填写"), 24)
+        self.assertNotIn("待填写", markdown)
+        self.assertEqual(markdown.count("local_demo_allowed"), 25)
 
 
 if __name__ == "__main__":

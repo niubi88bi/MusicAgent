@@ -45,7 +45,14 @@ class RagSchemaTests(unittest.TestCase):
         payload = json.loads(ADMISSION_AUDIT_PATH.read_text(encoding="utf-8"))
         policy = SourceAdmissionPolicy.model_validate(payload["source_use_admission"])
         self.assertEqual(policy.default_status, "evaluation_only")
-        self.assertEqual(policy.cards, {})
+        self.assertEqual(len(policy.sources), 7)
+        self.assertEqual(len(policy.cards), 17)
+        self.assertTrue(
+            all(row.status == "local_demo_allowed" for row in policy.sources.values())
+        )
+        self.assertTrue(
+            all(row.status == "local_demo_allowed" for row in policy.cards.values())
+        )
 
     def test_holdout_manifest_parse_and_query_labels(self) -> None:
         manifest_path = ROOT / "data/miaoxiang/style_fixed_queries.v1.3.json"
@@ -60,26 +67,34 @@ class RagSchemaTests(unittest.TestCase):
         self.assertEqual(composite.retrieval_scope, "query_expansion_only")
         eligible, reasons = production_admission(composite, self.sources_by_id[composite.source_id])
         self.assertFalse(eligible)
-        self.assertIn("review_status_not_approved", reasons)
         self.assertIn("not_a_direct_style_candidate", reasons)
         self.assertIn("source_admission_not_granted_for_public_product", reasons)
+        self.assertIn("card_admission_not_granted_for_public_product", reasons)
 
-    def test_draft_cards_are_not_production_eligible(self) -> None:
+    def test_current_cards_are_approved_but_default_scope_remains_blocked(self) -> None:
         for card in self.cards:
+            self.assertEqual(card.review_status, "approved")
             eligible, reasons = production_admission(card, self.sources_by_id[card.source_id])
             self.assertFalse(eligible)
-            self.assertIn("review_status_not_approved", reasons)
             self.assertIn("source_admission_not_granted_for_public_product", reasons)
+            self.assertIn("card_admission_not_granted_for_public_product", reasons)
 
     def test_approved_direct_card_requires_explicit_source_admission(self) -> None:
         card = self.cards[0].model_copy(update={"review_status": "approved"})
         eligible, reasons = production_admission(card, self.sources_by_id[card.source_id])
         self.assertFalse(eligible)
-        self.assertEqual(reasons, ["source_admission_not_granted_for_public_product"])
+        self.assertEqual(
+            reasons,
+            [
+                "source_admission_not_granted_for_public_product",
+                "card_admission_not_granted_for_public_product",
+            ],
+        )
         eligible, reasons = production_admission(
             card,
             self.sources_by_id[card.source_id],
-            source_admission_status="local_demo_allowed",
+            source_admission_statuses=["local_demo_allowed"],
+            card_admission_status="local_demo_allowed",
             requested_scope="local_demo",
         )
         self.assertTrue(eligible)
@@ -87,15 +102,23 @@ class RagSchemaTests(unittest.TestCase):
         eligible, reasons = production_admission(
             card,
             self.sources_by_id[card.source_id],
-            source_admission_status="local_demo_allowed",
+            source_admission_statuses=["local_demo_allowed"],
+            card_admission_status="local_demo_allowed",
             requested_scope="public_product",
         )
         self.assertFalse(eligible)
-        self.assertEqual(reasons, ["source_admission_not_granted_for_public_product"])
+        self.assertEqual(
+            reasons,
+            [
+                "source_admission_not_granted_for_public_product",
+                "card_admission_not_granted_for_public_product",
+            ],
+        )
         eligible, reasons = production_admission(
             card,
             self.sources_by_id[card.source_id],
-            source_admission_status="public_product_allowed",
+            source_admission_statuses=["public_product_allowed"],
+            card_admission_status="public_product_allowed",
             requested_scope="public_product",
         )
         self.assertTrue(eligible)
@@ -113,29 +136,29 @@ class RagSchemaTests(unittest.TestCase):
         self.assertFalse(eligible)
         self.assertIn("content_sha256_mismatch", reasons)
 
-    def test_dry_run_has_no_admitted_cards_and_no_mutation_flags(self) -> None:
+    def test_dry_run_admits_only_direct_cards_for_local_demo(self) -> None:
         report = validate_dataset(CARDS_PATH, SOURCES_PATH)
         self.assertEqual(report["card_count"], 17)
         self.assertEqual(report["source_count"], 7)
         self.assertEqual(report["valid_card_count"], 17)
         self.assertEqual(report["error_count"], 0)
-        self.assertEqual(report["local_demo_eligible_count"], 0)
+        self.assertEqual(report["local_demo_eligible_count"], 16)
         self.assertEqual(report["public_product_eligible_count"], 0)
         self.assertFalse(report["review_status_changed"])
         self.assertFalse(report["production_index_changed"])
         self.assertEqual(
-            report["blocked_reason_counts"]["local_demo:review_status_not_approved"],
-            17,
+            report["blocked_reason_counts"]["local_demo:not_a_direct_style_candidate"],
+            1,
         )
         self.assertEqual(
             report["blocked_reason_counts"][
-                "local_demo:source_admission_not_granted_for_local_demo"
+                "public_product:source_admission_not_granted_for_public_product"
             ],
             17,
         )
         self.assertEqual(
             report["blocked_reason_counts"][
-                "public_product:source_admission_not_granted_for_public_product"
+                "public_product:card_admission_not_granted_for_public_product"
             ],
             17,
         )
@@ -144,10 +167,19 @@ class RagSchemaTests(unittest.TestCase):
     def test_dry_run_reports_unknown_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cards_path = Path(directory) / "cards.jsonl"
+            audit_path = Path(directory) / "admission-audit.json"
             payload = _load_jsonl(CARDS_PATH)[0]
             payload["source_id"] = "missing-source"
             cards_path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
-            report = validate_dataset(cards_path, SOURCES_PATH)
+            audit = json.loads(ADMISSION_AUDIT_PATH.read_text(encoding="utf-8"))
+            audit["source_use_admission"]["cards"] = {
+                payload["id"]: audit["source_use_admission"]["cards"][payload["id"]]
+            }
+            audit_path.write_text(
+                json.dumps(audit, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            report = validate_dataset(cards_path, SOURCES_PATH, audit_path)
         self.assertEqual(report["error_count"], 1)
         self.assertEqual(report["card_results"][0]["errors"], ["source_id_not_in_catalog"])
         self.assertFalse(report["card_results"][0]["local_demo_eligible"])
@@ -164,6 +196,12 @@ class RagSchemaTests(unittest.TestCase):
         self.assertEqual(
             report["blocked_reason_counts"][
                 "local_demo:source_admission_not_granted_for_local_demo"
+            ],
+            17,
+        )
+        self.assertEqual(
+            report["blocked_reason_counts"][
+                "local_demo:card_admission_not_granted_for_local_demo"
             ],
             17,
         )

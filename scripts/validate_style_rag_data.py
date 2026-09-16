@@ -125,23 +125,36 @@ def validate_dataset(
             warnings.append("numeric_tempo_should_have_tempo_usage_note")
         if card.evidence_depth == "supplemented_open_reference":
             warnings.append("supplemented_reference_requires_explicit_admission_review")
-        source_admission = admission_policy.cards.get(card.id)
-        source_admission_status = (
-            source_admission.status
-            if source_admission is not None
+        related_source_ids = [card.source_id] + [
+            row.source_id for row in card.supplemental_sources
+        ]
+        source_admission_statuses = {
+            source_id: (
+                admission_policy.sources[source_id].status
+                if source_id in admission_policy.sources
+                else admission_policy.default_status
+            )
+            for source_id in related_source_ids
+        }
+        card_admission = admission_policy.cards.get(card.id)
+        card_admission_status = (
+            card_admission.status
+            if card_admission is not None
             else admission_policy.default_status
         )
         local_demo_eligible, local_demo_reasons = production_admission(
             card,
             source,
-            source_admission_status=source_admission_status,
+            source_admission_statuses=list(source_admission_statuses.values()),
+            card_admission_status=card_admission_status,
             requested_scope="local_demo",
             contract_errors=errors,
         )
         public_product_eligible, public_product_reasons = production_admission(
             card,
             source,
-            source_admission_status=source_admission_status,
+            source_admission_statuses=list(source_admission_statuses.values()),
+            card_admission_status=card_admission_status,
             requested_scope="public_product",
             contract_errors=errors,
         )
@@ -165,13 +178,29 @@ def validate_dataset(
                 "card_role": card.card_role,
                 "retrieval_scope": card.retrieval_scope,
                 "source_id": card.source_id,
-                "source_admission_status": source_admission_status,
+                "source_admission_statuses": source_admission_statuses,
+                "card_admission_status": card_admission_status,
                 "local_demo_eligible": local_demo_eligible,
                 "local_demo_block_reasons": local_demo_reasons,
                 "public_product_eligible": public_product_eligible,
                 "public_product_block_reasons": public_product_reasons,
             }
         )
+
+    unknown_admission_source_ids = sorted(
+        set(admission_policy.sources) - set(source_models)
+    )
+    unknown_admission_card_ids = sorted(
+        set(admission_policy.cards) - set(card_models)
+    )
+    admission_policy_errors.extend(
+        f"unknown_admission_source_id:{source_id}"
+        for source_id in unknown_admission_source_ids
+    )
+    admission_policy_errors.extend(
+        f"unknown_admission_card_id:{card_id}"
+        for card_id in unknown_admission_card_ids
+    )
 
     if card_duplicates:
         reason_counts["duplicate_card_id"] += len(card_duplicates)

@@ -13,7 +13,7 @@ class StyleTemplateContractTests(unittest.TestCase):
         cls.sources = _read_jsonl(cls.root / "data/miaoxiang/source_catalog.jsonl")
         cls.report = validate(cls.cards, cls.sources, schema_implementation_present=False)
 
-    def test_current_draft_cards_pass_shadow_contract(self):
+    def test_current_approved_cards_pass_historical_shadow_contract(self):
         self.assertTrue(self.report["valid"], self.report["errors"])
         self.assertEqual(self.report["card_count"], 17)
         self.assertEqual(self.report["error_count"], 0)
@@ -23,7 +23,7 @@ class StyleTemplateContractTests(unittest.TestCase):
         composite = next(card for card in self.cards if card["id"] == "style-dynamic-sad-folk-pop-remix-v2")
         self.assertEqual(composite["card_role"], "composite_query_template")
         self.assertEqual(composite["retrieval_scope"], "query_expansion_only")
-        self.assertTrue(all(card["review_status"] == "draft" for card in self.cards))
+        self.assertTrue(all(card["review_status"] == "approved" for card in self.cards))
         self.assertFalse(self.report["review_status_changed"])
         self.assertFalse(self.report["production_index_changed"])
 

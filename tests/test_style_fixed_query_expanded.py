@@ -32,7 +32,8 @@ class StyleFixedQueryExpandedTests(unittest.TestCase):
 
     def test_holdout_is_evidence_not_production_admission(self):
         self.assertFalse(self.result["production_index_changed"])
-        self.assertEqual(self.result["draft_card_count"], 17)
+        self.assertEqual(self.result["draft_card_count"], 0)
+        self.assertEqual(self.result["approved_card_count"], 17)
         self.assertEqual(self.result["query_count"], 20)
 
 

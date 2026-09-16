@@ -44,7 +44,7 @@ class StyleCardAdmissionReviewTests(unittest.TestCase):
             {"keep", "revise"},
         )
         self.assertTrue(all(card["human_notes"] for card in self.packet["cards"]))
-        self.assertTrue(all(card["review_status"] == "draft" for card in self.packet["cards"]))
+        self.assertTrue(all(card["review_status"] == "approved" for card in self.packet["cards"]))
 
     def test_composite_card_is_not_direct_candidate(self):
         card = next(

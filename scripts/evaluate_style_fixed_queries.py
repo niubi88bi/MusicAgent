@@ -123,6 +123,7 @@ def evaluate(cards: list[dict[str, Any]], sources: list[dict[str, Any]], manifes
         "card_count": len(cards),
         "source_count": len(sources),
         "draft_card_count": sum(card.get("review_status") == "draft" for card in cards),
+        "approved_card_count": sum(card.get("review_status") == "approved" for card in cards),
         "query_count": len(rows),
         "top1_primary_accuracy": sum(row["top1_primary_hit"] for row in rows) / len(rows),
         "top3_expected_recall": sum(row["top3_expected_hit"] for row in rows) / len(rows),
@@ -153,6 +154,7 @@ def main() -> None:
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: result[key] for key in (
         "evaluation_id", "card_count", "source_count", "draft_card_count",
+        "approved_card_count",
         "query_count", "top1_primary_accuracy", "top3_expected_recall",
         "mean_primary_reciprocal_rank", "queries_with_top1_score_ge_4",
         "low_signal_query_count", "minimum_top1_margin", "top1_source_traceability",
