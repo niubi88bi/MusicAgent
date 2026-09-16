@@ -262,6 +262,47 @@ retrieve_style_templates(
 
 下一步不先精审全部 390 词。风格卡先完成用户内容确认和固定查询设计，再决定是否安装检索依赖；候选数据通过结构检查、AI 审计或来源补证都不等于 RAG 效果已验证。
 
+### 9.1 正式 schema 最小草案（待确认，不是实现）
+
+本节只把当前影子契约整理为可审查的生产候选，不改变 JSONL、`review_status`、索引或 Agent 行为。正式实现前仍需确认以下准入语义。
+
+#### 对象边界
+
+- `SourceRecord`：来源目录中的 `source_id`、类型、标题、URL、访问/核验状态、许可证状态、允许用途、是否保存原文和备注。来源目录是唯一来源真相，不把卡片摘要当作网页原文。
+- `StyleCard`：当前 `style_templates.v2.jsonl` 的项目派生卡。必需保留唯一 `id`、版本/类型、`source_id`、内容摘要、检索字段、角色/检索范围、审核状态、内容哈希和后端验证状态。
+- `StyleQueryManifest`：固定查询和评估登记对象，只用于离线评估；`primary_card_ids`、`expected_card_ids` 是评估标签，不应写入生产卡片或运行时提示。
+
+#### 必须保持的约束
+
+1. `id` 唯一；`source_id` 必须能解析到来源目录；卡片来源标题、URL、许可说明和派生说明不能为空；内容哈希必须能由约定字段复算。
+2. `card_role=style_card` 只能配 `retrieval_scope=direct_candidate`；`card_role=composite_query_template` 只能配 `query_expansion_only`，且必须有非空 `query_expansion_terms`，永远不能进入直接候选 Top-k。
+3. `retrieval_terms` 是核心风格词；`hidden_retrieval_aliases`、`query_expansion_terms`、`scene_tags` 分层保存，场景词不能获得风格主分。
+4. 人声字段要么全部出现（`vocal_type`、`rap_default`、`instrumental_default`、`default_language`），要么全部缺省；纯器乐默认与可选哼鸣的语义必须保持一致。
+5. 数值 BPM 只能表示参考范围，不能被 schema 解释为后端精确控制；`backend_validation.heartmula-local` 在有真实跟随实验前保持 `unverified`。
+6. 对 `no_redistribution_license_observed` 来源，只允许保存来源信息、事实性字段和项目原创短摘要；不得把原文、完整示例歌词、图片或音频写入索引。
+
+#### approved-only 索引候选闸门
+
+只有同时满足以下条件的卡片才允许进入未来 production collection：
+
+```text
+review_status == "approved"
+and card_role == "style_card"
+and retrieval_scope == "direct_candidate"
+and source_id 可解析且来源 verification_status == "verified_readable"
+and 影子/正式 schema 错误数 == 0
+and 许可用途允许保存当前派生字段，且未保存受限原文
+```
+
+组合模板仍可作为查询扩展输入，但不计入直接候选准入数量。用户表达包含明确说唱/纯器乐等约束时，运行时可使用属性过滤；表达只有“国风”“浩室”等宽泛词时，默认保留多候选并返回区分依据。
+
+#### 实现验收（后续执行前确认）
+
+- 单元测试覆盖 JSON 解析、枚举/类型、来源引用、哈希、角色-范围一致性、approved-only 过滤和组合模板排除。
+- dry-run 能报告可入库/被拒及具体原因，且不修改卡片状态、不创建 production collection。
+- 每个返回项保留卡片 ID、来源 ID、来源标题/URL、角色和检索分层；零召回、未知过滤条件和来源缺失均返回明确状态。
+- 完成上述验证前，不改变制作 Agent 提示、评分、路由或默认 embedding/词面策略。
+
 ## 10. 核验来源
 
 - 妙响公开工作室：https://music.douyin.com/studio

@@ -540,3 +540,41 @@ Trance、Drum & Bass 当前仍使用固定版本 English Wikipedia 作为宽泛�
 ### 边界与下一步
 
 v1.3 只作为不可变 holdout 证据；17 张卡仍为 `draft`，`approved=0`，不建立生产 collection，不改正式评分、制作 Agent 或路由。下一步先汇总各版本失败类型，再设计正式 schema 与 approved-only 索引；390 个韵脚候选精审及候选词 RAG 继续暂停。
+
+## D10-024｜先归类查询歧义，再确认 approved-only schema
+
+- 日期：2026-09-16
+- 状态：证据汇总与非绑定 schema 草案完成；尚未实现运行时代码
+
+### 证据归类
+
+- v1 的 q04/q08 低信号通过中文表达补强后，在 v1.1 达到 8/8 top-1、低信号 0；这说明查询表达可造成假失败，不能直接归因于卡片缺词。
+- v1.3 的 q31“中文国风 哲思说唱 古琴 808”在词面和 BGE 中都不是稳定单一 top-1，但 Top-3 预期集合命中；它是组合歧义，应返回多候选和区分依据。
+- v1.2 角色影子策略已确认组合模板 1/1、直接主卡 3/3、Top-3 5/5，且直接候选排除组合模板；该边界值得纳入未来 schema。
+
+### 非绑定 schema 草案
+
+`docs/rag-source-and-evaluation-plan.md` 新增最小草案，包含 `SourceRecord`、`StyleCard`、评估用 `StyleQueryManifest` 的边界，字段分层、来源许可约束、角色-检索范围一致性、approved-only 闸门和 dry-run 验收。草案不改变现有 JSONL、状态、索引或 Agent 行为。
+
+### 待确认语义
+
+正式实现前需要确认：只有 `review_status=approved`、直接候选角色、来源可解析且契约无错误的卡才能进入 production collection；宽泛或组合表达默认保留多候选；组合模板只做查询扩展。确认前不实现生产 schema、过滤器或运行时路由。
+
+## D10-025｜实现正式 schema 与 dry-run 准入校验，不自动批准卡片
+
+- 日期：2026-09-16
+- 状态：正式 schema 与 dry-run 已实现；production collection 和运行时路由仍关闭
+
+### 实施
+
+- `tools/rag/schemas.py` 以 Pydantic 实现 `SourceRecord`、`StyleCard`、补充来源和固定查询 manifest 契约；校验字段类型、来源引用、内容哈希、角色-检索范围、人声字段和词类重叠。
+- `scripts/validate_style_rag_data.py` 实现只读 dry-run，production-admission 与结构有效性分开报告；不修改 JSONL、`review_status` 或 Chroma。
+- 组合模板维持 `query_expansion_only`，即使未来状态为 approved 也不能作为直接风格候选。
+
+### 验证
+
+当前 17 张卡、7 条来源全部解析，错误数 0；17 张仍因 `draft` 阻塞，组合模板额外被排除；警告 8 条为非阻塞提示。专项测试 10/10、完整离线回归 141/141 通过。
+
+### 边界
+
+schema 通过不等于人工批准、来源生产准入或生成质量验证；Trance/Drum & Bass 的补充来源状态仍需单独审阅。下一步只能在人工批准并再次 dry-run 后实现 approved-only 索引构建，不自动写入 `approved`。
