@@ -18,6 +18,7 @@ data/*.jsonl
 *.wav
 *.m4a
 data/output/
+data/rag/chroma/
 
 # 临时
 tmp/

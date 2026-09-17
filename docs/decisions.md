@@ -621,3 +621,16 @@ schema 通过不等于人工批准、来源生产准入或生成质量验证；T
 ### 使用边界
 
 项目与派生数据保持本地或私有，不公开部署、不提供数据下载、不推送包含这批派生数据的公开仓库。Wikipedia补充内容继续保留固定版本、署名、修改说明和CC BY-SA 4.0提示；腾讯文档只作字段设计参考。内容批准不代表HeartMuLa能够稳定跟随BPM、乐器、结构或子风格。
+
+## D10-029｜本地演示风格索引独立构建，不接Agent
+
+- 日期：2026-09-16
+- 状态：隔离collection与查询回归完成
+
+### 决策与实现
+
+新建 `style_templates_local_demo_v1`，只写入16张同时满足内容approved、卡片/主来源/补充来源local-demo授权和direct-candidate角色的卡。组合模板不入collection，只在命中“苦情民谣电音”等项目入口时扩展查询。embedding文本排除prompt_template、许可文本、scene_tags和未验证backend_tags，避免生成内容和场景词污染检索。
+
+### 结果与边界
+
+collection为16条、512维，来源可追溯与范围检查均为100%，公开产品候选0，Agent未接入。v1.2/v1.3直接top-1与Top-3均为100%；v1.1直接top-1为6/7、Top-3为7/7，唯一差异是Future Bass与Trance在旋律build/drop查询上的合理近邻，二者都属于预登记相关集合，因此不为追求100%修改卡片。该结果只证明本地检索，不证明生成质量或HeartMuLa控制。
