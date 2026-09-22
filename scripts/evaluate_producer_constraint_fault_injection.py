@@ -39,6 +39,7 @@ class _StrictModel(BaseModel):
 
 class FaultCase(_StrictModel):
     case_id: str = Field(min_length=1)
+    review_case_id: str | None = None
     source_case_id: str = Field(min_length=1)
     fault_family: Literal[
         "wrong_vocal_gender",
@@ -50,11 +51,22 @@ class FaultCase(_StrictModel):
     expected_injected_hard_codes: list[str] = Field(min_length=1)
     base_plan: ProductionPlan
     injected_plan: ProductionPlan
+    target_field: Literal[
+        "style_prompt", "tags", "vocal_direction", "arrangement_note"
+    ] | None = None
+    original_fragment: str | None = None
+    injected_fragment: str | None = None
 
 
 class FaultManifest(_StrictModel):
     schema_version: str = Field(min_length=1)
-    kind: Literal["producer_constraint_fault_injection"]
+    kind: Literal[
+        "producer_constraint_fault_injection",
+        "producer_constraint_local_fault_injection",
+    ]
+    injection_scope: Literal[
+        "legacy_degraded_plan", "single_field_single_fragment"
+    ] = "legacy_degraded_plan"
     frozen_at: str = Field(min_length=1)
     source_manifest: str = Field(min_length=1)
     source_experiment: str = Field(min_length=1)
@@ -74,6 +86,18 @@ class FaultManifest(_StrictModel):
             raise ValueError("fault_source_case_ids_must_be_unique")
         if len(families) != len(set(families)):
             raise ValueError("fault_families_must_be_unique")
+        if self.injection_scope == "single_field_single_fragment":
+            for case in self.cases:
+                if not all(
+                    (case.target_field, case.original_fragment, case.injected_fragment)
+                ):
+                    raise ValueError(
+                        f"localized_fault_metadata_missing:{case.case_id}"
+                    )
+                if case.original_fragment == case.injected_fragment:
+                    raise ValueError(
+                        f"localized_fault_fragments_must_differ:{case.case_id}"
+                    )
         return self
 
 
@@ -90,6 +114,16 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _changed_fields(left: ProductionPlan, right: ProductionPlan) -> list[str]:
+    left_payload = left.model_dump(mode="json")
+    right_payload = right.model_dump(mode="json")
+    return [
+        field
+        for field in left_payload
+        if left_payload[field] != right_payload[field]
+    ]
 
 
 def load_manifest(path: Path = CASES_PATH) -> FaultManifest:
@@ -112,6 +146,37 @@ def validate_fault_contracts(
 ) -> list[dict[str, Any]]:
     contracts: list[dict[str, Any]] = []
     for source_case, fault in resolve_cases(manifest):
+        changed_fields = _changed_fields(fault.base_plan, fault.injected_plan)
+        if manifest.injection_scope == "single_field_single_fragment":
+            target_field = fault.target_field
+            if target_field is None:
+                raise ValueError(f"localized_fault_target_missing:{fault.case_id}")
+            base_payload = fault.base_plan.model_dump(mode="json")
+            injected_payload = fault.injected_plan.model_dump(mode="json")
+            base_value = base_payload[target_field]
+            if not isinstance(base_value, str):
+                raise ValueError(
+                    f"localized_fault_target_must_be_text:{fault.case_id}"
+                )
+            original = fault.original_fragment or ""
+            replacement = fault.injected_fragment or ""
+            if base_value.count(original) != 1:
+                raise ValueError(
+                    f"localized_fault_original_fragment_count:{fault.case_id}"
+                )
+            expected_payload = dict(base_payload)
+            expected_payload[target_field] = base_value.replace(
+                original, replacement, 1
+            )
+            if expected_payload != injected_payload:
+                raise ValueError(
+                    f"localized_fault_has_unregistered_changes:{fault.case_id}"
+                )
+            if changed_fields != [target_field]:
+                raise ValueError(
+                    f"localized_fault_changed_fields_mismatch:{fault.case_id}:"
+                    f"{changed_fields}"
+                )
         constraints = extract_explicit_constraints(source_case.user_request_text)
         base_all = check_plan_constraints(
             fault.base_plan,
@@ -142,6 +207,8 @@ def validate_fault_contracts(
                 "base_advisory_codes": [row.code for row in base_advisory],
                 "injected_hard_violation_codes": codes,
                 "injected_advisory_codes": [row.code for row in injected_advisory],
+                "base_to_injected_changed_fields": changed_fields,
+                "target_field": fault.target_field,
                 "planned_repair_calls": 1,
             }
         )
@@ -180,7 +247,7 @@ def build_blind_card(
     plans = {"base": fault.base_plan, "repaired": repaired_plan}
     return (
         {
-            "case_id": fault.case_id,
+            "case_id": fault.review_case_id or fault.case_id,
             "song_request": source_case.user_request_text,
             "song_requirement": source_case.requirement.model_dump(mode="json"),
             "lyrics": source_case.lyric_draft.model_dump(mode="json"),
@@ -189,6 +256,35 @@ def build_blind_card(
         },
         mapping,
     )
+
+
+def rebuild_blind_materials(
+    manifest: FaultManifest,
+    *,
+    experiment_dir: Path,
+) -> dict[str, Path]:
+    summary = _read_json(experiment_dir / "summary.json")
+    completed_by_case = {
+        row["case_id"]: row for row in summary.get("completed", [])
+    }
+    cards: list[dict[str, Any]] = []
+    keys: list[dict[str, str]] = []
+    for source_case, fault in resolve_cases(manifest):
+        if fault.case_id not in completed_by_case:
+            raise ValueError(f"completed_fault_case_missing:{fault.case_id}")
+        repaired = ProductionPlan.model_validate(
+            completed_by_case[fault.case_id]["repaired_plan"]
+        )
+        card, mapping = build_blind_card(source_case, fault, repaired)
+        cards.append(card)
+        keys.append({"case_id": card["case_id"], **mapping})
+    cards_path = experiment_dir / "blind_review_cards_corrected.json"
+    key_path = experiment_dir / "blind_review_key_corrected.json"
+    review_path = experiment_dir / "blind_review_corrected.md"
+    _write_json(cards_path, cards)
+    _write_json(key_path, keys)
+    review_path.write_text(render_blind_review(cards), encoding="utf-8")
+    return {"cards": cards_path, "key": key_path, "review": review_path}
 
 
 def render_blind_review(cards: list[dict[str, Any]]) -> str:
@@ -250,7 +346,12 @@ def run_experiment(
 ) -> Path:
     contracts = validate_fault_contracts(manifest)
     pairs = resolve_cases(manifest)
-    experiment_dir = output_root / f"producer-constraint-fault-v1-{uuid4().hex}"
+    prefix = (
+        "producer-constraint-local-fault-v2"
+        if manifest.injection_scope == "single_field_single_fragment"
+        else "producer-constraint-fault-v1"
+    )
+    experiment_dir = output_root / f"{prefix}-{uuid4().hex}"
     experiment_dir.mkdir(parents=True, exist_ok=False)
     settings = get_settings()
     _write_json(experiment_dir / "fault_contracts.json", contracts)
@@ -261,6 +362,7 @@ def run_experiment(
             "case_manifest": str(manifest_path),
             "case_manifest_sha256": _file_hash(manifest_path),
             "source_experiment": manifest.source_experiment,
+            "injection_scope": manifest.injection_scope,
             "case_count": len(pairs),
             "initial_generation_calls": 0,
             "planned_repair_calls": len(pairs),
@@ -343,13 +445,28 @@ def run_experiment(
                         repaired.model_dump(mode="json")
                         == fault.base_plan.model_dump(mode="json")
                     ),
+                    "target_field": fault.target_field,
+                    "base_to_injected_changed_fields": _changed_fields(
+                        fault.base_plan, fault.injected_plan
+                    ),
+                    "injected_to_repaired_changed_fields": _changed_fields(
+                        fault.injected_plan, repaired
+                    ),
+                    "base_to_repaired_changed_fields": _changed_fields(
+                        fault.base_plan, repaired
+                    ),
+                    "unauthorized_repair_changed_fields": [
+                        field
+                        for field in _changed_fields(fault.injected_plan, repaired)
+                        if field != fault.target_field
+                    ],
                     "telemetry": DeepSeekLLM.summarize_call_records(records),
                 }
                 _write_json(case_dir / "result.json", report)
                 completed.append(report)
                 card, mapping = build_blind_card(source_case, fault, repaired)
                 cards.append(card)
-                keys.append({"case_id": fault.case_id, **mapping})
+                keys.append({"case_id": card["case_id"], **mapping})
             except Exception as error:
                 failure = {
                     "case_id": fault.case_id,
@@ -382,6 +499,10 @@ def run_experiment(
             "repaired_equals_base_count": sum(
                 row["repaired_equals_base"] for row in completed
             ),
+            "unauthorized_repair_change_case_count": sum(
+                bool(row["unauthorized_repair_changed_fields"])
+                for row in completed
+            ),
             "completed": completed,
             "failures": failures,
             "llm_telemetry": telemetry,
@@ -401,6 +522,11 @@ def main() -> None:
     parser.add_argument("--cases", type=Path, default=CASES_PATH)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument(
+        "--rebuild-blind-from",
+        type=Path,
+        help="从既有运行结果离线重建中性命名盲包，不调用模型",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="确认仅调用4次受控故障修复；不生成首稿或音频",
@@ -408,6 +534,20 @@ def main() -> None:
     args = parser.parse_args()
     manifest = load_manifest(args.cases)
     contracts = validate_fault_contracts(manifest)
+    if args.rebuild_blind_from is not None:
+        outputs = rebuild_blind_materials(
+            manifest,
+            experiment_dir=args.rebuild_blind_from,
+        )
+        print(
+            json.dumps(
+                {key: str(path) for key, path in outputs.items()},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            flush=True,
+        )
+        return
     if not args.execute:
         print(
             json.dumps(

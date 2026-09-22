@@ -103,7 +103,10 @@ def decode_reviews(
 ) -> dict[str, Any]:
     if not review.blind_at_rating:
         raise ValueError("reviews_were_not_blind_at_rating")
-    manifest_ids = {case.case_id for case in load_manifest(manifest_path).cases}
+    manifest_ids = {
+        case.review_case_id or case.case_id
+        for case in load_manifest(manifest_path).cases
+    }
     key_by_case = {row.get("case_id", ""): row for row in key_rows}
     if set(key_by_case) != manifest_ids:
         raise ValueError("fault_review_key_case_set_mismatch")
