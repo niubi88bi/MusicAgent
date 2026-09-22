@@ -19,6 +19,7 @@ from scripts.evaluate_producer_rag_gated_ab import build_gate_context
 from tools.rag.producer_constraint_guard import (
     check_plan_constraints,
     extract_explicit_constraints,
+    split_constraint_violations,
 )
 from tools.rag.style_retrieval_policy import decide_style_retrieval
 
@@ -86,6 +87,25 @@ class ProducerConstraintGuardTests(unittest.TestCase):
         codes = {row.code for row in violations}
         self.assertIn("forbidden_term_present", codes)
         self.assertIn("required_term_missing", codes)
+        hard, advisory = split_constraint_violations(violations)
+        self.assertEqual({row.code for row in hard}, codes)
+        self.assertEqual(advisory, [])
+
+    def test_unrequested_gender_is_advisory_only(self) -> None:
+        case = self.cases["r01-deep-house-mix-voice-flex-tempo"]
+        constraints = extract_explicit_constraints(case.user_request_text)
+        violations = check_plan_constraints(
+            _plan(
+                "Deep House with gentle Chinese male vocal.",
+                "Male solo using chest-head mix.",
+                "Keep the chorus restrained.",
+            ),
+            user_text=case.user_request_text,
+            constraints=constraints,
+        )
+        hard, advisory = split_constraint_violations(violations)
+        self.assertEqual(hard, [])
+        self.assertIn("unrequested_vocal_gender", {row.code for row in advisory})
 
     def test_checker_does_not_treat_negated_terms_as_usage(self) -> None:
         female_case = self.cases["r05-vina-house-female-vocal-override"]

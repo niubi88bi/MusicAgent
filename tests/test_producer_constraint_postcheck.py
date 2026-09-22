@@ -17,6 +17,7 @@ from scripts.evaluate_producer_constraint_postcheck import (
 from tools.rag.producer_constraint_guard import (
     check_plan_constraints,
     extract_explicit_constraints,
+    split_constraint_violations,
 )
 
 
@@ -62,12 +63,14 @@ class ProducerConstraintPostcheckTests(unittest.TestCase):
             user_text=source.user_request_text,
             constraints=extract_explicit_constraints(source.user_request_text),
         )
-        messages = build_repair_messages(source, frozen.initial_plan, violations)
+        hard, advisory = split_constraint_violations(violations)
+        messages = build_repair_messages(source, frozen.initial_plan, hard)
         self.assertEqual(messages[-2]["role"], "assistant")
         self.assertIn("确定性后检发现", messages[-1]["content"])
         self.assertIn("required_term_missing", messages[-1]["content"])
         self.assertIn("forbidden_term_present", messages[-1]["content"])
-        self.assertIn("unrequested_vocal_gender", messages[-1]["content"])
+        self.assertNotIn("unrequested_vocal_gender", messages[-1]["content"])
+        self.assertIn("unrequested_vocal_gender", {row.code for row in advisory})
         self.assertNotIn("优先级高于风格参考卡", messages[1]["content"])
 
     def test_blind_packet_hides_initial_and_postcheck_identity(self) -> None:

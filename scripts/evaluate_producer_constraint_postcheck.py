@@ -26,6 +26,7 @@ from tools.rag.producer_constraint_guard import (
     ConstraintViolation,
     check_plan_constraints,
     extract_explicit_constraints,
+    split_constraint_violations,
 )
 from tools.rag.style_retrieval_policy import decide_style_retrieval
 
@@ -107,6 +108,7 @@ def validate_postcheck_contracts(
             user_text=source_case.user_request_text,
             constraints=constraints,
         )
+        hard, advisory = split_constraint_violations(violations)
         codes = [row.code for row in violations]
         if codes != frozen.expected_initial_violation_codes:
             raise ValueError(
@@ -117,8 +119,10 @@ def validate_postcheck_contracts(
             {
                 "case_id": source_case.case_id,
                 "initial_violation_codes": codes,
-                "action": "repair_once" if violations else "pass_through",
-                "planned_llm_calls": int(bool(violations)),
+                "initial_hard_violation_codes": [row.code for row in hard],
+                "initial_advisory_codes": [row.code for row in advisory],
+                "action": "repair_once" if hard else "pass_through",
+                "planned_llm_calls": int(bool(hard)),
             }
         )
     return contracts
@@ -309,8 +313,11 @@ def run_experiment(
                     user_text=source_case.user_request_text,
                     constraints=constraints,
                 )
+                initial_hard, initial_advisory = split_constraint_violations(
+                    initial_violations
+                )
                 final_plan = frozen.initial_plan
-                repair_attempted = bool(initial_violations)
+                repair_attempted = bool(initial_hard)
                 records: list[Any] = []
                 if repair_attempted:
                     if llm is None:
@@ -321,7 +328,7 @@ def run_experiment(
                         build_repair_messages(
                             source_case,
                             frozen.initial_plan,
-                            initial_violations,
+                            initial_hard,
                         ),
                     )
                     records = llm.telemetry_snapshot()[before:]
@@ -329,6 +336,9 @@ def run_experiment(
                     final_plan,
                     user_text=source_case.user_request_text,
                     constraints=constraints,
+                )
+                final_hard, final_advisory = split_constraint_violations(
+                    final_violations
                 )
                 unchanged = (
                     final_plan.model_dump(mode="json")
@@ -343,11 +353,23 @@ def run_experiment(
                     "initial_violations": [
                         row.model_dump(mode="json") for row in initial_violations
                     ],
+                    "initial_hard_violations": [
+                        row.model_dump(mode="json") for row in initial_hard
+                    ],
+                    "initial_advisories": [
+                        row.model_dump(mode="json") for row in initial_advisory
+                    ],
                     "action": "repair_once" if repair_attempted else "pass_through",
                     "repair_attempted": repair_attempted,
                     "final_plan": final_plan.model_dump(mode="json"),
                     "final_violations": [
                         row.model_dump(mode="json") for row in final_violations
+                    ],
+                    "final_hard_violations": [
+                        row.model_dump(mode="json") for row in final_hard
+                    ],
+                    "final_advisories": [
+                        row.model_dump(mode="json") for row in final_advisory
                     ],
                     "unchanged": unchanged,
                     "telemetry": DeepSeekLLM.summarize_call_records(records),
@@ -392,11 +414,11 @@ def run_experiment(
             ),
             "repair_attempted_count": sum(row["repair_attempted"] for row in completed),
             "repair_succeeded_count": sum(
-                row["repair_attempted"] and not row["final_violations"]
+                row["repair_attempted"] and not row["final_hard_violations"]
                 for row in completed
             ),
-            "remaining_violation_case_count": sum(
-                bool(row["final_violations"]) for row in completed
+            "remaining_hard_violation_case_count": sum(
+                bool(row["final_hard_violations"]) for row in completed
             ),
             "completed": completed,
             "failures": failures,

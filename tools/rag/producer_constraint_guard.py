@@ -46,6 +46,7 @@ class ConstraintViolation(_StrictModel):
         "unrequested_secondary_genre",
         "exact_bpm_written_as_hard_requirement",
     ]
+    severity: Literal["hard", "advisory"]
     concept: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
 
@@ -65,7 +66,17 @@ TERM_GROUPS: dict[str, tuple[str, ...]] = {
         "male lead",
         "male solo",
     ),
-    "rap_or_mc": ("说唱", "rap", "mc", "spoken bars"),
+    "rap_or_mc": (
+        "说唱",
+        "rap",
+        "mc",
+        "spoken bars",
+        "口号",
+        "spoken slogan",
+        "spoken slogans",
+        "sampled slogan",
+        "sampled slogans",
+    ),
     "vocal_material": (
         "人声",
         "vocal",
@@ -223,6 +234,7 @@ def check_plan_constraints(
             violations.append(
                 ConstraintViolation(
                     code="required_term_missing",
+                    severity="hard",
                     concept=rule.concept,
                     evidence=rule.evidence,
                 )
@@ -240,6 +252,7 @@ def check_plan_constraints(
             violations.append(
                 ConstraintViolation(
                     code="forbidden_term_present",
+                    severity="hard",
                     concept=rule.concept,
                     evidence=present,
                 )
@@ -259,6 +272,7 @@ def check_plan_constraints(
                 violations.append(
                     ConstraintViolation(
                         code="unrequested_vocal_gender",
+                        severity="advisory",
                         concept=concept,
                         evidence=present,
                     )
@@ -271,6 +285,7 @@ def check_plan_constraints(
                 violations.append(
                     ConstraintViolation(
                         code="unrequested_secondary_genre",
+                        severity="advisory",
                         concept="secondary_genre",
                         evidence=occurrence,
                     )
@@ -283,10 +298,11 @@ def check_plan_constraints(
         )
         if hard_bpm:
             violations.append(
-                ConstraintViolation(
-                    code="exact_bpm_written_as_hard_requirement",
-                    concept="bpm",
-                    evidence=hard_bpm.group(0),
+            ConstraintViolation(
+                code="exact_bpm_written_as_hard_requirement",
+                severity="hard",
+                concept="bpm",
+                evidence=hard_bpm.group(0),
                 )
             )
 
@@ -295,3 +311,13 @@ def check_plan_constraints(
         key = (violation.code, violation.concept, violation.evidence)
         unique[key] = violation
     return list(unique.values())
+
+
+def split_constraint_violations(
+    violations: list[ConstraintViolation],
+) -> tuple[list[ConstraintViolation], list[ConstraintViolation]]:
+    """Separate auto-repairable hard conflicts from report-only advisories."""
+
+    hard = [row for row in violations if row.severity == "hard"]
+    advisory = [row for row in violations if row.severity == "advisory"]
+    return hard, advisory
