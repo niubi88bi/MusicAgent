@@ -38,6 +38,7 @@ class FragmentPatch(_StrictModel):
     violation_code: str = Field(min_length=1)
     concept: str = Field(min_length=1)
     strategy: Literal["deterministic", "llm_fragment"]
+    operation: Literal["replace", "append"] = "replace"
 
 
 class LocatedViolation(_StrictModel):
@@ -137,12 +138,92 @@ def _required_concepts(constraints: ExplicitProductionConstraints) -> set[str]:
     return {rule.concept for rule in constraints.must_include}
 
 
+def _explicit_piano_guitar_pair(
+    constraints: ExplicitProductionConstraints,
+) -> bool:
+    """Return whether the user explicitly supplied the paired substitution relation."""
+
+    required = _required_concepts(constraints)
+    forbidden = {rule.concept for rule in constraints.must_avoid}
+    return "acoustic_guitar" in required and "piano" in forbidden
+
+
+def _positive_concept_spans(plan: ProductionPlan, concept: str) -> list[tuple[str, tuple[int, int]]]:
+    payload = plan.model_dump(mode="json")
+    spans: list[tuple[str, tuple[int, int]]] = []
+    for field in TEXT_FIELDS:
+        value = str(payload[field])
+        spans.extend((field, span) for span in _positive_spans(value, concept))
+    for index, tag in enumerate(plan.tags):
+        spans.extend((f"tags[{index}]", span) for span in _positive_spans(tag, concept))
+    return spans
+
+
+def _ambiguous_instrument_context(fragment: str) -> bool:
+    lowered = fragment.lower()
+    return bool(
+        re.search(
+            r"反例|模拟|录音|噪声|采样|reference|example|simulat|recording|noise|sample",
+            lowered,
+        )
+    )
+
+
+def _append_pair_constraint_patch(
+    plan: ProductionPlan,
+    *,
+    violation: ConstraintViolation,
+    constraints: ExplicitProductionConstraints,
+) -> FragmentPatch | None:
+    if (
+        violation.code != "required_term_missing"
+        or violation.concept != "acoustic_guitar"
+        or not _explicit_piano_guitar_pair(constraints)
+    ):
+        return None
+    # If a positive piano occurrence exists, the paired replacement path must
+    # resolve it first. Appending a sentence would leave the hard conflict in
+    # place and would hide an unsafe replacement decision.
+    if _positive_concept_spans(plan, "piano"):
+        return None
+    if _positive_concept_spans(plan, "acoustic_guitar"):
+        return None
+    original = plan.arrangement_note
+    if not original.strip():
+        return None
+    chinese = bool(re.search(r"[\u3400-\u9fff]", original))
+    suffix = (
+        "；木吉他承担主要伤感动机；不使用钢琴"
+        if chinese
+        else "; acoustic guitar carries the main wistful motif; no piano"
+    )
+    if suffix in original:
+        return None
+    return FragmentPatch(
+        field="arrangement_note",
+        original_fragment=original,
+        replacement_fragment=original + suffix,
+        violation_code=violation.code,
+        concept=violation.concept,
+        strategy="deterministic",
+        operation="append",
+    )
+
+
 def deterministic_patch(
     plan: ProductionPlan,
     *,
     violation: ConstraintViolation,
     constraints: ExplicitProductionConstraints,
 ) -> FragmentPatch | None:
+    appended = _append_pair_constraint_patch(
+        plan,
+        violation=violation,
+        constraints=constraints,
+    )
+    if appended is not None:
+        return appended
+
     if violation.code == "exact_bpm_written_as_hard_requirement":
         matches: list[tuple[str, re.Match[str]]] = []
         pattern = re.compile(
@@ -177,6 +258,15 @@ def deterministic_patch(
     }
     for (forbidden, wanted), (zh_old, zh_new, en_old, en_new) in replacements.items():
         if violation.concept == forbidden and wanted in required:
+            if (
+                forbidden == "piano"
+                and wanted == "acoustic_guitar"
+                and (
+                    len(_positive_concept_spans(plan, "piano")) != 1
+                    or _ambiguous_instrument_context(location.original_fragment)
+                )
+            ):
+                return None
             original = location.original_fragment
             if zh_old in original:
                 replacement = original.replace(zh_old, zh_new, 1)
@@ -237,6 +327,11 @@ def apply_fragment_patch(plan: ProductionPlan, patch: FragmentPatch) -> Producti
     else:
         if not isinstance(value, str) or value.count(patch.original_fragment) != 1:
             raise ValueError("patch_original_fragment_must_match_once")
+        if patch.operation == "append":
+            if value == patch.replacement_fragment:
+                return plan
+            if not patch.replacement_fragment.startswith(patch.original_fragment):
+                raise ValueError("append_patch_must_preserve_original_prefix")
         payload[patch.field] = value.replace(
             patch.original_fragment, patch.replacement_fragment, 1
         )

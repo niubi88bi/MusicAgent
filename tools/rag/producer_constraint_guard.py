@@ -176,8 +176,17 @@ def extract_explicit_constraints(user_text: str) -> ExplicitProductionConstraint
         must_avoid.append(_term("vocal_material", "用户明确要求纯音乐或无人声"))
 
     instrument_patterns = (
-        ("piano", r"(?:不要|禁用|禁止|避免)(?:使用)?钢琴"),
-        ("acoustic_guitar", r"(?:必须用|改用|使用|用)木吉他"),
+        (
+            "piano",
+            r"(?:不要|禁用|禁止|避免)(?:使用)?钢琴|"
+            r"(?:no|without|avoid|excluding)\s+(?:the\s+)?piano",
+        ),
+        (
+            "acoustic_guitar",
+            r"(?:必须用|改用|使用|用)木吉他|"
+            r"(?:must\s+(?:use|include)|use)\s+(?:an?\s+)?acoustic\s+guitar|"
+            r"acoustic\s+guitar\s+must\s+(?:carry|serve|provide|be)",
+        ),
     )
     for concept, pattern in instrument_patterns:
         match = re.search(pattern, text)

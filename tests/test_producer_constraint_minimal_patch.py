@@ -25,6 +25,7 @@ from tools.rag.producer_constraint_patch import (
     FragmentPatch,
     apply_fragment_patch,
     unresolved_location,
+    deterministic_patch,
     validate_patched_plan,
 )
 
@@ -203,6 +204,92 @@ class ProducerConstraintMinimalPatchTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "must_match_once"):
             apply_fragment_patch(fault.injected_plan, patch)
+
+    def test_paired_piano_guitar_replaces_one_unambiguous_clause(self) -> None:
+        user_text = "不要钢琴，必须用木吉他做伤感动机"
+        plan = ProductionPlan(
+            style_prompt="Sad Slap House，克制的中文独唱与中速电子律动",
+            tags=["Sad Slap House", "克制", "夜晚"],
+            vocal_direction="中文独唱，近距离克制表达",
+            arrangement_note="以悲伤钢琴开场，随后加入低频脉冲并保持动态克制",
+        )
+        constraints = extract_explicit_constraints(user_text)
+        violations = check_plan_constraints(
+            plan, user_text=user_text, constraints=constraints
+        )
+        hard, _ = split_constraint_violations(violations)
+        patch = deterministic_patch(
+            plan,
+            violation=next(row for row in hard if row.concept == "piano"),
+            constraints=constraints,
+        )
+        self.assertIsNotNone(patch)
+        assert patch is not None
+        repaired = apply_fragment_patch(plan, patch)
+        self.assertEqual(repaired.arrangement_note.split("，", 1)[0], "以悲伤木吉他开场")
+        self.assertEqual(
+            check_plan_constraints(
+                repaired, user_text=user_text, constraints=constraints
+            ),
+            [],
+        )
+
+    def test_paired_piano_guitar_appends_fixed_constraint_when_no_piano_exists(self) -> None:
+        user_text = "不要钢琴，必须用木吉他做伤感动机"
+        plan = ProductionPlan(
+            style_prompt="Vina House，明亮轻盈的中文独唱舞曲",
+            tags=["Vina House", "明亮", "轻盈"],
+            vocal_direction="中文清亮独唱，保持自然",
+            arrangement_note="主歌以弹跳低音和稀疏合成器推进，副歌保持明亮而克制",
+        )
+        constraints = extract_explicit_constraints(user_text)
+        violations = check_plan_constraints(
+            plan, user_text=user_text, constraints=constraints
+        )
+        hard, _ = split_constraint_violations(violations)
+        patch = deterministic_patch(
+            plan,
+            violation=next(row for row in hard if row.concept == "acoustic_guitar"),
+            constraints=constraints,
+        )
+        self.assertIsNotNone(patch)
+        assert patch is not None
+        self.assertEqual(patch.operation, "append")
+        repaired = apply_fragment_patch(plan, patch)
+        self.assertIn("木吉他承担主要伤感动机；不使用钢琴", repaired.arrangement_note)
+        self.assertEqual(apply_fragment_patch(repaired, patch), repaired)
+        self.assertEqual(
+            check_plan_constraints(
+                repaired, user_text=user_text, constraints=constraints
+            ),
+            [],
+        )
+
+    def test_paired_piano_guitar_rejects_multiple_piano_locations(self) -> None:
+        user_text = "不要钢琴，必须用木吉他做伤感动机"
+        plan = ProductionPlan(
+            style_prompt="Sad Slap House，悲伤钢琴与克制电子律动",
+            tags=["Sad Slap House", "克制", "夜晚"],
+            vocal_direction="中文独唱，近距离克制表达",
+            arrangement_note="主歌使用简约钢琴，桥段再次回到钢琴并降低鼓组密度",
+        )
+        _, _, unresolved = plan_deterministic_stage(plan, user_text=user_text)
+        self.assertTrue(unresolved)
+        self.assertEqual(
+            {row.concept for row in unresolved}, {"piano", "acoustic_guitar"}
+        )
+
+    def test_paired_piano_guitar_rejects_ambiguous_piano_context(self) -> None:
+        user_text = "不要钢琴，必须用木吉他做伤感动机"
+        plan = ProductionPlan(
+            style_prompt="Sad Slap House，保留旧钢琴录音的噪声作为反例，不使用钢琴演奏",
+            tags=["Sad Slap House", "克制", "实验"],
+            vocal_direction="中文独唱，近距离克制表达",
+            arrangement_note="低频脉冲保持克制，木吉他尚未进入",
+        )
+        _, _, unresolved = plan_deterministic_stage(plan, user_text=user_text)
+        self.assertTrue(unresolved)
+        self.assertEqual({row.concept for row in unresolved}, {"piano"})
 
     def test_blind_card_uses_neutral_id_and_hides_method_identity(self) -> None:
         source, fault = self.by_id["lf02-forbidden-rap-mc-slogans"]
