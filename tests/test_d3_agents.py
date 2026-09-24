@@ -164,6 +164,24 @@ class D3AgentTests(unittest.TestCase):
         self.assertIn(lyric_draft.title, user_message)
         self.assertIn(lyric_draft.hook, user_message)
 
+    def test_producer_receives_confirmed_instrument_constraints(self) -> None:
+        requirement = SongRequirement.model_validate(REQUIREMENT)
+        lyric_draft = LyricDraft.model_validate(LYRIC_DRAFT)
+        llm = FakeJsonLLM([PRODUCTION_PLAN])
+        ProducerAgent(llm).run(
+            requirement,
+            lyric_draft,
+            production_constraints={
+                "forbidden_instruments": ["piano"],
+                "forbidden_scope": ["acoustic_piano", "electric_piano", "rhodes"],
+                "replacement_mode": "acoustic_guitar",
+                "replacement_instrument": "acoustic_guitar",
+            },
+        )
+        user_message = llm.calls[0][1]["content"]
+        self.assertIn("forbidden_scope", user_message)
+        self.assertIn("acoustic_guitar", user_message)
+
     def test_agent_system_prompts_include_json_structure_examples(self) -> None:
         llm = FakeJsonLLM([REQUIREMENT, LYRIC_DRAFT, PRODUCTION_PLAN])
         requirement = RequirementAgent(llm).run("写一首关于夏夜回家的歌")

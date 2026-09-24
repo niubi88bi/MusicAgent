@@ -24,6 +24,11 @@
         <form id="composer" class="composer">
           <label class="sr-only" for="theme">描述你想创作的歌曲</label>
           <textarea id="theme" maxlength="200" placeholder="例如：写一首关于夏夜下班回家的歌，温暖治愈，带一点 city pop 的感觉…"></textarea>
+          <section id="clarification-card" class="clarification-card" aria-live="polite" hidden>
+            <div class="clarification-heading"><span class="clarification-kicker">需要确认一项制作选择</span><button id="clarification-cancel" class="clarification-cancel" type="button">取消</button></div>
+            <p id="clarification-question"></p>
+            <div id="clarification-options" class="clarification-options"></div>
+          </section>
           <div class="composer-toolbar"><span class="mode-label"><span class="small-dot"></span> 歌词创作 <span class="mode-divider">/</span> 自动质检与改写</span><button class="primary-button" type="submit">生成歌词 <span aria-hidden="true">↗</span></button></div>
         </form>
         <div class="suggestions" aria-label="灵感提示"><span>从一点灵感开始</span><button data-prompt="夏夜下班回家，温暖治愈的 city pop">夏夜归途</button><button data-prompt="毕业那天和朋友告别，带着希望的流行歌曲">写给毕业的我们</button><button data-prompt="在雨天散步，安静温柔的中文民谣">雨天慢慢走</button></div>

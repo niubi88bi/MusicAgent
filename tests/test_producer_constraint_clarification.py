@@ -12,8 +12,10 @@ from scripts.build_producer_constraint_clarification_holdout import (
 )
 from scripts.evaluate_producer_constraint_clarification import run_evaluation
 from tools.rag.producer_constraint_clarification import (
+    ClarificationAnswer,
     PIANO_SCOPE,
     analyze_producer_constraint_clarification,
+    resolve_clarification_answer,
 )
 
 
@@ -39,6 +41,18 @@ class ProducerConstraintClarificationTests(unittest.TestCase):
         self.assertEqual(result.replacement_mode, "explicit")
         self.assertEqual(result.explicit_replacement, "acoustic_guitar")
         self.assertEqual(result.questions, [])
+
+    def test_answer_becomes_structured_production_constraint(self) -> None:
+        decision = analyze_producer_constraint_clarification("不要钢琴，主题为夜归")
+        resolved = resolve_clarification_answer(
+            decision,
+            ClarificationAnswer(
+                code="forbidden_instrument_without_replacement",
+                option_code="acoustic_guitar",
+            ),
+        )
+        self.assertEqual(resolved["replacement_instrument"], "acoustic_guitar")
+        self.assertEqual(resolved["forbidden_scope"], PIANO_SCOPE)
 
     def test_hard_ban_with_explicit_use_word_is_recognized(self) -> None:
         result = analyze_producer_constraint_clarification(

@@ -29,7 +29,7 @@ def load_persisted_task_snapshots(root: Path) -> list[dict]:
 
 def public_text_state(state: Mapping[str, object]) -> dict:
     """只导出文本产物白名单；不把内部磁盘路径作为可播放音频。"""
-    keys = ("theme", "requirement", "lyric_candidates", "subjective_review",
+    keys = ("theme", "production_constraints", "requirement", "lyric_candidates", "subjective_review",
             "subjective_review_history", "candidate_regeneration_count", "candidate_selection",
             "selected_lyricist", "lyric_draft", "lyrics", "production_plan",
             "scores", "quality_report", "quality_status", "quality_history",

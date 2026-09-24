@@ -9,6 +9,7 @@ let submitting = false;
 let pollTimer;
 let pollFailures = 0;
 let syncBusy = false;
+let pendingClarification = null;
 const stageNames = {validate_input:'校验输入',requirement:'理解创作意图',lyricist_structured:'作词人 A 创作',lyricist_imagery:'作词人 B 创作',subjective_judge:'匿名主观评审',lyricist_selection:'候选综合选优',lyricist:'入选歌词回炉',quality:'规则质检',producer:'整理制作方案'};
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -19,6 +20,35 @@ function node(tag, className, text) {
 function notify(message) {
   clearTimeout(toastTimer); $('toast').textContent = message; $('toast').hidden = false;
   toastTimer = setTimeout(() => { $('toast').hidden = true; }, 5000);
+}
+function clearClarification() {
+  pendingClarification = null;
+  $('clarification-card').hidden = true;
+  $('clarification-question').textContent = '';
+  $('clarification-options').replaceChildren();
+  setSubmitState();
+}
+function renderClarification(decision) {
+  const question = decision.questions?.[0];
+  if (!question) { clearClarification(); return; }
+  pendingClarification = decision;
+  $('clarification-question').textContent = question.question;
+  const options = $('clarification-options'); options.replaceChildren();
+  for (const option of question.options) {
+    const label = node('label', 'clarification-option');
+    const input = document.createElement('input');
+    input.type = 'radio'; input.name = 'clarification-option'; input.value = option.code;
+    const copy = node('span'); copy.append(node('strong', '', option.label), node('small', '', option.description));
+    label.append(input, copy); options.append(label);
+  }
+  $('clarification-card').hidden = false;
+  setSubmitState();
+  $('clarification-card').scrollIntoView({block:'nearest', behavior:'smooth'});
+}
+function selectedClarificationAnswers() {
+  if (!pendingClarification) return [];
+  const selected = document.querySelector('input[name="clarification-option"]:checked');
+  return selected ? [{code: pendingClarification.questions[0].code, option_code: selected.value}] : [];
 }
 function showView(name) {
   if (name !== 'workspace') {
@@ -234,6 +264,8 @@ document.querySelectorAll('[data-prompt]').forEach((button) => button.addEventLi
 $('composer').addEventListener('submit', submitText);
 $('lyrics-tab').addEventListener('click', () => tab('lyrics')); $('process-tab').addEventListener('click', () => tab('process'));
 document.querySelector('.tab-list').addEventListener('keydown', (event) => { if (['ArrowLeft','ArrowRight'].includes(event.key)) { event.preventDefault(); const name = $('lyrics-panel').hidden ? 'lyrics' : 'process'; tab(name); $(name + '-tab').focus(); } });
+$('theme').addEventListener('input', () => { if (pendingClarification) clearClarification(); });
+$('clarification-cancel').addEventListener('click', clearClarification);
 $('version-select').addEventListener('change', () => selectVersion(Number($('version-select').value)));
 $('audio-preview-button').addEventListener('click', submitAudio);
 $('audio-player').addEventListener('error', () => notify('音频文件未能加载，请检查本地示例文件是否完整。'));
@@ -275,7 +307,7 @@ function setSubmitState() {
   const running = records.some(item => ['pending','running'].includes(item.task?.status));
   const button = $('composer').querySelector('[type="submit"]');
   button.disabled = submitting || running || !apiReady || pollFailures > 0;
-  button.textContent = submitting ? '正在提交…' : running ? '创作进行中…' : '生成歌词 ↗';
+  button.textContent = submitting ? '正在提交…' : running ? '创作进行中…' : pendingClarification ? '确认选择并生成 ↗' : '生成歌词 ↗';
 }
 async function requestJson(path, options = {}) {
   const controller = new AbortController();
@@ -283,7 +315,10 @@ async function requestJson(path, options = {}) {
   try {
     const response = await fetch(path, {...options, signal:controller.signal, cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : '输入不符合要求，请输入 2～200 字的主题。');
+    if (!response.ok) {
+      const detail = typeof data.detail === 'string' ? data.detail : data.detail?.message;
+      throw new Error(detail || '输入不符合要求，请输入 2～200 字的主题。');
+    }
     return data;
   } finally { clearTimeout(timeout); }
 }
@@ -312,9 +347,21 @@ async function submitText(event) {
   if (!apiReady || submitting || records.some(item => ['pending','running'].includes(item.task?.status))) return;
   const theme = $('theme').value.trim();
   if (theme.length < 2 || theme.length > 200) { notify('请输入 2～200 字的创作主题。'); $('theme').focus(); return; }
+  const clarificationAnswers = selectedClarificationAnswers();
+  if (pendingClarification && !clarificationAnswers.length) { notify('请先选择一种替代配器，或选择“系统按曲风选择”。'); return; }
+  const body = {theme};
+  if (clarificationAnswers.length) body.clarification_answers = clarificationAnswers;
   submitting = true; setSubmitState();
   try {
-    const task = await requestJson('/api/tasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({theme})});
+    const preflight = await requestJson('/api/tasks/preflight', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (preflight.status === 'clarification_required') {
+      renderClarification(preflight);
+      notify('这条需求还缺少一项制作选择。');
+      return;
+    }
+    if (preflight.status === 'advisory_only' && preflight.advisories?.length) notify(preflight.advisories[0]);
+    const task = await requestJson('/api/tasks', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    clearClarification();
     mergeTask(task); renderLists(); openRecord(task.task_id); tab('process');
   } catch (error) { notify(error.name === 'AbortError' || error instanceof TypeError ? '提交结果暂时无法确认，正在查询任务列表，请勿重复提交。' : error.message); }
   finally { await syncTasks(); submitting = false; setSubmitState(); }

@@ -15,6 +15,7 @@ class MusicWorkflowState(TypedDict):
 
     theme: str
     requested_duration_seconds: NotRequired[int]
+    production_constraints: NotRequired[dict[str, object]]
     requirement: NotRequired[SongRequirement]
     candidate_persona: NotRequired[str]
     candidate_generation_round: NotRequired[int]

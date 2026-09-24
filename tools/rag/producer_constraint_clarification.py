@@ -36,6 +36,19 @@ class ClarificationQuestion(_StrictModel):
     recommended_option: Literal["auto_style_compatible"]
 
 
+class ClarificationAnswer(_StrictModel):
+    """用户对一次澄清问题的结构化选择。"""
+
+    code: Literal["forbidden_instrument_without_replacement"]
+    option_code: Literal[
+        "acoustic_guitar",
+        "synth_pad_or_pluck",
+        "strings",
+        "no_replacement",
+        "auto_style_compatible",
+    ]
+
+
 class ProducerConstraintClarification(_StrictModel):
     status: Literal[
         "clarification_required",
@@ -91,6 +104,12 @@ QUESTION = ClarificationQuestion(
     ],
     recommended_option="auto_style_compatible",
 )
+
+REPLACEMENT_INSTRUMENTS = {
+    "acoustic_guitar": "acoustic_guitar",
+    "synth_pad_or_pluck": "synth_pad_or_pluck",
+    "strings": "strings",
+}
 
 
 def _normalize(text: str) -> str:
@@ -215,3 +234,27 @@ def analyze_producer_constraint_clarification(
         questions=[QUESTION],
         **base,
     )
+
+
+def resolve_clarification_answer(
+    decision: ProducerConstraintClarification,
+    answer: ClarificationAnswer,
+) -> dict[str, object]:
+    """将一个合法选项转换为后续制作阶段可消费的硬约束。"""
+
+    if decision.status != "clarification_required":
+        raise ValueError("当前需求不需要澄清答案")
+    if answer.code != QUESTION.code:
+        raise ValueError("澄清问题代码不匹配")
+    allowed = {option.code for option in QUESTION.options}
+    if answer.option_code not in allowed:
+        raise ValueError("澄清选项不在允许范围内")
+    result: dict[str, object] = {
+        "forbidden_instruments": list(decision.forbidden_instruments),
+        "forbidden_scope": list(decision.forbidden_scope),
+        "replacement_mode": answer.option_code,
+    }
+    replacement = REPLACEMENT_INSTRUMENTS.get(answer.option_code)
+    if replacement is not None:
+        result["replacement_instrument"] = replacement
+    return result

@@ -23,7 +23,7 @@ class TaskQueueFullError(RuntimeError):
     """运行名额和等待名额均已占用。"""
 
 
-def execute_text(theme, on_event):
+def execute_text(theme, on_event, production_constraints=None):
     """每个任务独立使用 LLM 连接，文本模式图没有 generator 节点。"""
     llm = DeepSeekLLM()
     try:
@@ -36,7 +36,10 @@ def execute_text(theme, on_event):
             text_only=True,
             on_event=on_event,
         )
-        return graph.invoke({"theme": theme, "requested_duration_seconds": 30})
+        initial_state = {"theme": theme, "requested_duration_seconds": 30}
+        if production_constraints:
+            initial_state["production_constraints"] = production_constraints
+        return graph.invoke(initial_state)
     finally:
         llm.close()
 
@@ -76,7 +79,11 @@ class WorkflowRunner:
             # 优雅关闭等待已接收任务完成；强制杀进程不支持自动恢复。
             executor.shutdown(wait=True)
 
-    def submit(self, theme: str) -> dict:
+    def submit(
+        self,
+        theme: str,
+        production_constraints: dict[str, object] | None = None,
+    ) -> dict:
         with self._lock:
             if self._executor is None:
                 raise RuntimeError("任务执行器未启动")
@@ -84,8 +91,13 @@ class WorkflowRunner:
                 raise TaskQueueFullError()
             task = None
             try:
-                task = self.store.create({"theme": theme, "mode": "text", "duration_seconds": 30})
-                future = self._executor.submit(self._run, task["task_id"], theme)
+                input_payload = {"theme": theme, "mode": "text", "duration_seconds": 30}
+                if production_constraints:
+                    input_payload["production_constraints"] = production_constraints
+                task = self.store.create(input_payload)
+                future = self._executor.submit(
+                    self._run, task["task_id"], theme, production_constraints
+                )
                 future.add_done_callback(lambda _: self._slots.release())
                 return task
             except Exception:
@@ -94,7 +106,7 @@ class WorkflowRunner:
                     self.store.update_status(task["task_id"], TaskStatus.FAILED, error="无法调度任务，请稍后再试。")
                 raise
 
-    def _run(self, task_id, theme):
+    def _run(self, task_id, theme, production_constraints=None):
         job_dir = self.output_dir / task_id
         self.store.update_status(task_id, TaskStatus.RUNNING)
         events = []
@@ -116,7 +128,10 @@ class WorkflowRunner:
                 write_task_snapshot(job_dir, self.store.get(task_id))
 
         try:
-            state = self.execute(theme, observe)
+            if production_constraints:
+                state = self.execute(theme, observe, production_constraints)
+            else:
+                state = self.execute(theme, observe)
             write_text_artifacts(job_dir, state)
             # 完成状态先落盘，再向轮询读者发布，避免保存失败却显示成功。
             result = public_text_state(state)

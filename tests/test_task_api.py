@@ -77,6 +77,47 @@ class TextTaskApiTests(unittest.TestCase):
             for filename in ("task.json", "lyrics.txt", "lyric_draft.json", "production_plan.json", "quality_report.json", "lyric_revision_history.json"):
                 self.assertTrue((self.output / task["task_id"] / filename).is_file())
 
+    def test_piano_preflight_blocks_then_answers_create_constrained_task(self):
+        received_constraints = []
+
+        def execute(theme, observer, production_constraints=None):
+            received_constraints.append(production_constraints)
+            state = fake_execute([GOOD_DRAFT])(theme, observer)
+            state["production_constraints"] = production_constraints
+            return state
+
+        with self.client(execute) as client:
+            request = {"theme": "不要钢琴，做一首夜归主题中文歌"}
+            preflight = client.post("/api/tasks/preflight", json=request)
+            self.assertEqual(preflight.status_code, 200)
+            self.assertEqual(preflight.json()["status"], "clarification_required")
+            self.assertEqual(client.get("/api/tasks").json()["items"], [])
+
+            blocked = client.post("/api/tasks", json=request)
+            self.assertEqual(blocked.status_code, 409)
+            self.assertEqual(client.get("/api/tasks").json()["items"], [])
+
+            answer = {
+                **request,
+                "clarification_answers": [{
+                    "code": "forbidden_instrument_without_replacement",
+                    "option_code": "acoustic_guitar",
+                }],
+            }
+            ready = client.post("/api/tasks/preflight", json=answer)
+            self.assertEqual(ready.status_code, 200)
+            self.assertEqual(ready.json()["status"], "ready")
+            self.assertEqual(
+                ready.json()["production_constraints"]["replacement_instrument"],
+                "acoustic_guitar",
+            )
+            response = client.post("/api/tasks", json=answer)
+            self.assertEqual(response.status_code, 202)
+            task = self.await_done(client, response.json()["task_id"])
+            self.assertEqual(task["input"]["production_constraints"]["replacement_mode"], "acoustic_guitar")
+            self.assertEqual(task["result"]["production_constraints"]["replacement_instrument"], "acoustic_guitar")
+            self.assertEqual(received_constraints[0]["replacement_instrument"], "acoustic_guitar")
+
     def test_cap_selects_earlier_best_but_done_does_not_mean_passed(self):
         with self.client(fake_execute([BAD_DRAFT, WORSE_DRAFT, WORSE_DRAFT])) as client:
             task_id = client.post("/api/tasks", json={"theme":"夏夜回家"}).json()["task_id"]

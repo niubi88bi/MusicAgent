@@ -488,9 +488,17 @@ def build_music_graph(
         return "lyricist"
 
     def producer_node(state: MusicWorkflowState) -> dict[str, object]:
-        production_plan = producer_agent.run(
-            state["requirement"], state["lyric_draft"]
-        )
+        production_constraints = state.get("production_constraints")
+        if production_constraints:
+            production_plan = producer_agent.run(
+                state["requirement"],
+                state["lyric_draft"],
+                production_constraints=production_constraints,
+            )
+        else:
+            production_plan = producer_agent.run(
+                state["requirement"], state["lyric_draft"]
+            )
         return {"production_plan": production_plan}
 
     def generator_node(state: MusicWorkflowState) -> dict[str, object]:

@@ -96,6 +96,8 @@ def _producer_system_prompt() -> str:
         "你是音乐制作人，为文本到音乐模型设计提示词。必须只输出 JSON 对象。"
         "style_prompt 用英文，覆盖 Genre、Mood、Era、Instruments、Vocal、Dynamics，"
         "不要包含真实艺人名。tags 使用简短英文或中文标签。"
+        "如果用户提供制作硬约束，必须在 style_prompt、vocal_direction 或 "
+        "arrangement_note 中保持一致；禁止的音色不得出现。"
         "JSON 输出结构示例（仅说明字段和类型，不得照抄内容）："
         '{"style_prompt":"City pop, warm mood, electric piano, gentle vocal",'
         '"tags":["city pop","warm","night"],"vocal_direction":"gentle close-mic vocal",'

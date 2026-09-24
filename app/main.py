@@ -14,6 +14,11 @@ from services.task_store import TaskStore, TaskNotFoundError
 from services.workflow_runner import WorkflowRunner, TaskQueueFullError
 from services.workflow_artifacts import load_persisted_task_snapshots
 from services.audio_runner import AudioQueueFullError, AudioRunner, AudioTaskNotFoundError
+from tools.rag.producer_constraint_clarification import (
+    ClarificationAnswer,
+    analyze_producer_constraint_clarification,
+    resolve_clarification_answer,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +27,34 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class TextTaskInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     theme: str = Field(min_length=2, max_length=200, strict=True)
+    clarification_answers: list[ClarificationAnswer] = Field(
+        default_factory=list, max_length=1
+    )
+
+
+def _resolve_production_constraints(body: TextTaskInput) -> dict[str, object] | None:
+    """在创建任务前重新校验追问答案，避免只依赖前端预检。"""
+
+    decision = analyze_producer_constraint_clarification(body.theme)
+    if decision.status == "clarification_required":
+        if len(body.clarification_answers) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "clarification_required",
+                    "message": "这条需求还缺少一项制作选择，请先完成钢琴替代配器确认。",
+                    "clarification": decision.model_dump(mode="json"),
+                },
+            )
+        try:
+            return resolve_clarification_answer(
+                decision, body.clarification_answers[0]
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+    if body.clarification_answers:
+        raise HTTPException(status_code=422, detail="当前需求不需要澄清答案。")
+    return None
 
 
 def create_app(*, store=None, runner=None, audio_runner=None, include_persisted: bool = True) -> FastAPI:
@@ -83,12 +116,32 @@ def create_app(*, store=None, runner=None, audio_runner=None, include_persisted:
                          if item["task_id"] not in ids)
         return {"items": [attach_audio(item) for item in items]}
 
+    @app.post("/api/tasks/preflight")
+    def preflight_task(body: TextTaskInput) -> dict[str, object]:
+        """只做确定性需求预检，不创建任务、不调用模型。"""
+
+        decision = analyze_producer_constraint_clarification(body.theme)
+        if body.clarification_answers:
+            try:
+                constraints = resolve_clarification_answer(
+                    decision, body.clarification_answers[0]
+                )
+            except ValueError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            return {
+                "status": "ready",
+                "clarification": decision.model_dump(mode="json"),
+                "production_constraints": constraints,
+            }
+        return decision.model_dump(mode="json")
+
     @app.post("/api/tasks", status_code=202)
     def create_task(body: TextTaskInput):
         if not get_settings().is_llm_configured:
             raise HTTPException(503, "未配置文本模型密钥，请在本地配置后重启服务。")
+        production_constraints = _resolve_production_constraints(body)
         try:
-            return runner.submit(body.theme)
+            return runner.submit(body.theme, production_constraints)
         except TaskQueueFullError:
             raise HTTPException(429, "创作队列已满（1 个运行、最多 2 个等待），请稍后再试。", headers={"Retry-After": "5"})
 
