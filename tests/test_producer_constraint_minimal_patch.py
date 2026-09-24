@@ -39,7 +39,10 @@ class ProducerConstraintMinimalPatchTests(unittest.TestCase):
         cls.by_id = {fault.case_id: (source, fault) for source, fault in cls.pairs}
 
     def test_dry_run_routes_three_rules_and_one_fragment_call(self) -> None:
-        previews = [preview_case(source, fault) for source, fault in self.pairs]
+        previews = [
+            preview_case(source, fault, allow_llm_fragment_shadow=True)
+            for source, fault in self.pairs
+        ]
         actions = {row["case_id"]: row["action"] for row in previews}
         self.assertEqual(
             actions,
@@ -50,6 +53,12 @@ class ProducerConstraintMinimalPatchTests(unittest.TestCase):
                 "lf04-hard-fixed-bpm": "deterministic_only",
             },
         )
+
+    def test_default_preview_fails_closed_for_unresolved_fragment(self) -> None:
+        source, fault = self.by_id["lf02-forbidden-rap-mc-slogans"]
+        preview = preview_case(source, fault)
+        self.assertEqual(preview["action"], "fail_closed")
+        self.assertIsNotNone(preview["llm_location"])
 
     def test_deterministic_cases_restore_frozen_bases_exactly(self) -> None:
         for case_id in (

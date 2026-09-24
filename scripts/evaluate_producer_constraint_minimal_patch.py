@@ -206,7 +206,12 @@ def plan_deterministic_stage(
     raise ValueError("deterministic_patch_iteration_limit")
 
 
-def preview_case(source_case: Any, fault: FaultCase) -> dict[str, Any]:
+def preview_case(
+    source_case: Any,
+    fault: FaultCase,
+    *,
+    allow_llm_fragment_shadow: bool = False,
+) -> dict[str, Any]:
     intermediate, patches, unresolved = plan_deterministic_stage(
         fault.injected_plan,
         user_text=source_case.user_request_text,
@@ -216,7 +221,7 @@ def preview_case(source_case: Any, fault: FaultCase) -> dict[str, Any]:
         location = unresolved_location(intermediate, unresolved[0])
     if not unresolved:
         action = "deterministic_only"
-    elif len(unresolved) == 1 and location is not None:
+    elif allow_llm_fragment_shadow and len(unresolved) == 1 and location is not None:
         action = "llm_fragment_once"
     else:
         action = "fail_closed"
@@ -306,11 +311,19 @@ def run_experiment(
     *,
     manifest_path: Path,
     output_root: Path,
+    allow_llm_fragment_shadow: bool = False,
 ) -> Path:
     pairs = resolve_cases(manifest)
     experiment_dir = output_root / f"producer-constraint-minimal-patch-v1-{uuid4().hex}"
     experiment_dir.mkdir(parents=True, exist_ok=False)
-    previews = [preview_case(source, fault) for source, fault in pairs]
+    previews = [
+        preview_case(
+            source,
+            fault,
+            allow_llm_fragment_shadow=allow_llm_fragment_shadow,
+        )
+        for source, fault in pairs
+    ]
     settings = get_settings()
     _write_json(experiment_dir / "previews.json", previews)
     _write_json(
@@ -321,6 +334,7 @@ def run_experiment(
             "case_manifest_sha256": _file_hash(manifest_path),
             "case_count": len(pairs),
             "repair_policy": "minimal_fragment_fail_closed",
+            "llm_fragment_shadow_enabled": allow_llm_fragment_shadow,
             "max_llm_fragment_calls_per_case": 1,
             "audio_generated": False,
             "runtime_agent_connected": False,
@@ -349,6 +363,8 @@ def run_experiment(
                 )
                 before_calls = len(llm.telemetry_snapshot())
                 if unresolved:
+                    if not allow_llm_fragment_shadow:
+                        raise ValueError("non_deterministic_fragment_repair_disabled")
                     if len(unresolved) != 1:
                         raise ValueError("multiple_unresolved_hard_violations")
                     location = unresolved_location(current, unresolved[0])
@@ -396,12 +412,14 @@ def run_experiment(
                 _write_json(case_dir / "result.json", report)
                 completed.append(report)
             except Exception as error:
+                fail_closed = str(error) == "non_deterministic_fragment_repair_disabled"
                 failure = {
                     "case_id": fault.case_id,
-                    "status": "repair_failed",
+                    "status": "fail_closed" if fail_closed else "repair_failed",
                     "error_type": type(error).__name__,
                     "error": str(error),
                     "fallback_used": False,
+                    "failure_mode": "non_deterministic_repair" if fail_closed else "repair_error",
                 }
                 _write_json(case_dir / "failure.json", failure)
                 failures.append(failure)
@@ -414,6 +432,9 @@ def run_experiment(
         {
             "completed_case_count": len(completed),
             "failed_case_count": len(failures),
+            "fail_closed_case_count": sum(
+                row["status"] == "fail_closed" for row in failures
+            ),
             "final_equals_base_count": sum(row["final_equals_base"] for row in completed),
             "deterministic_only_count": sum(
                 not row["llm_telemetry"]["successful_calls"] for row in completed
@@ -424,7 +445,8 @@ def run_experiment(
             "completed": completed,
             "failures": failures,
             "llm_telemetry": telemetry,
-            "fallback_policy": "fail_closed_without_full_rewrite",
+            "fallback_policy": "deterministic_only_else_fail_closed",
+            "llm_fragment_shadow_enabled": allow_llm_fragment_shadow,
             "runtime_agent_connected": False,
             "runtime_injection_changed": False,
             "audio_generated": False,
@@ -452,7 +474,12 @@ def main() -> None:
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="确认最多调用一次片段修复；失败关闭，不生成音频",
+        help="运行确定性补丁；无法确定性修复时失败关闭，不生成音频",
+    )
+    parser.add_argument(
+        "--allow-llm-fragment-shadow",
+        action="store_true",
+        help="仅研究历史片段模型分支；默认关闭，不代表准入",
     )
     args = parser.parse_args()
     manifest = load_manifest(args.cases)
@@ -483,7 +510,11 @@ def main() -> None:
         )
         return
     previews = [
-        preview_case(source_case, fault)
+        preview_case(
+            source_case,
+            fault,
+            allow_llm_fragment_shadow=args.allow_llm_fragment_shadow,
+        )
         for source_case, fault in resolve_cases(manifest)
     ]
     if not args.execute:
@@ -515,6 +546,7 @@ def main() -> None:
         manifest,
         manifest_path=args.cases,
         output_root=args.out,
+        allow_llm_fragment_shadow=args.allow_llm_fragment_shadow,
     )
     print(f"实验输出：{output}", flush=True)
 
