@@ -86,7 +86,7 @@ TERM_GROUPS: dict[str, tuple[str, ...]] = {
         "vocal sample",
     ),
     "piano": ("钢琴", "piano"),
-    "acoustic_guitar": ("木吉他", "acoustic guitar"),
+    "acoustic_guitar": ("木吉他", "原声吉他", "acoustic guitar"),
 }
 
 SECONDARY_GENRES: tuple[str, ...] = (
@@ -179,11 +179,12 @@ def extract_explicit_constraints(user_text: str) -> ExplicitProductionConstraint
         (
             "piano",
             r"(?:不要|禁用|禁止|避免)(?:使用)?钢琴|"
+            r"钢琴(?:全部)?(?:拿掉|移除|去掉)|"
             r"(?:no|without|avoid|excluding)\s+(?:the\s+)?piano",
         ),
         (
             "acoustic_guitar",
-            r"(?:必须用|改用|使用|用)木吉他|"
+            r"(?:必须用|改用|使用|用)(?:木吉他|原声吉他)|"
             r"(?:must\s+(?:use|include)|use)\s+(?:an?\s+)?acoustic\s+guitar|"
             r"acoustic\s+guitar\s+must\s+(?:carry|serve|provide|be)",
         ),

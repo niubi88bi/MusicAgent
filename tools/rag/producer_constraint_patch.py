@@ -192,8 +192,16 @@ def _append_pair_constraint_patch(
     if not original.strip():
         return None
     chinese = bool(re.search(r"[\u3400-\u9fff]", original))
+    guitar_label = "木吉他"
+    for rule in constraints.must_include:
+        if rule.concept == "acoustic_guitar" and "原声吉他" in rule.evidence:
+            guitar_label = "原声吉他"
+            break
+        if rule.concept == "acoustic_guitar" and "acoustic guitar" in rule.evidence.lower():
+            guitar_label = "acoustic guitar"
+            break
     suffix = (
-        "；木吉他承担主要伤感动机；不使用钢琴"
+        f"；{guitar_label}承担主要伤感动机；不使用钢琴"
         if chinese
         else "; acoustic guitar carries the main wistful motif; no piano"
     )
@@ -268,8 +276,13 @@ def deterministic_patch(
             ):
                 return None
             original = location.original_fragment
+            guitar_label = zh_new
+            for rule in constraints.must_include:
+                if rule.concept == "acoustic_guitar" and "原声吉他" in rule.evidence:
+                    guitar_label = "原声吉他"
+                    break
             if zh_old in original:
-                replacement = original.replace(zh_old, zh_new, 1)
+                replacement = original.replace(zh_old, guitar_label, 1)
             elif re.search(en_old, original, flags=re.IGNORECASE):
                 replacement = re.sub(
                     en_old, en_new, original, count=1, flags=re.IGNORECASE
