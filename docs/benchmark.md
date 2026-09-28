@@ -90,3 +90,11 @@
 - 成品：`data/output/web/09f0126d2e354deaa374d469561155be/audio/3909735da19945f89082692e136ae1b5/song.mp3`；ffprobe 验证为 MP3、30.08 秒、558,624 字节。
 - `GET /api/tasks/09f0126d2e354deaa374d469561155be/audio` 返回 200、`audio/mpeg`、长度 558,624 字节；网页显示 HeartMuLa 30 秒播放器与下载入口，并实际验证播放和暂停控件。
 - 这证明当前页面文件容量足以完成这一首 30 秒 Web 试听，但只是一条真实样本，不能据此承诺稳定耗时、音质或任意并发负载。
+
+## 2026-09-28｜隔离 120 秒完整版验证（非 Web 默认路径）
+
+- 验证脚本：`scripts/validate_full_song_120s.py`；主题：《晚风陪我回家》；请求时长：120 秒。
+- 文本阶段真实调用 DeepSeek 5 次成功逻辑调用、6 次 API attempts、总 Token 8,546；未调用 GPU。正式质检总分 95.4，其中押韵 93.4、结构 100；独立时长准入通过，32 条演唱行、376 个中文字符、Hook 在副歌出现 3 次，无未完成标记。
+- 音频阶段真实调用 HeartMuLa 一次，阶段总耗时 1,200.566 秒（约 20 分钟），包含模型加载、采样、HeartCodec 解码和卸载；没有接入 Web 任务队列或 `/api` 接口。
+- 成品：`data/output/full-song-120-validation/4b30e754bca24eb0a7058619cbadaa44/audio/music/song.mp3`；ffprobe 显示 MP3、48 kHz、双声道、120.08 秒、2,203,968 字节；`ffmpeg -v error` 解码检查返回 0。
+- 该样本证明当前机器和当前权重可以完成一次隔离 120 秒生成，不证明稳定耗时、音频质量、浏览器播放或并发能力。人工试听仍未完成；临时本地 HTTP 目录可访问，但 Codex 内置浏览器直接打开 MP3 被 `ERR_BLOCKED_BY_CLIENT` 拦截。
