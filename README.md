@@ -43,6 +43,8 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 
 HeartMuLa 在本机 16 GB 内存环境会产生较高系统提交压力。若日志停在 checkpoint 加载且 Windows 事件 2004 报虚拟内存不足，应先释放内存或调整页面文件后再重试，不能把 `No module named 'triton'` 提示直接判作根因。
 
+当前同一虚拟环境兼容 HeartMuLa 与 BGE 检索的已验证组合为 `transformers==4.57.0`、`tokenizers==0.22.1`、`sentence-transformers==5.7.0`。HeartMuLa 源码固定要求前两项；升级到 Transformers 5.x 会导致本机推理报 `RoPE cache is not built`。调整依赖后应先运行 `uv pip check --python .venv\Scripts\python.exe`，再分别验证风格检索与试听生成。
+
 静态服务仅公开 `frontend/`，不公开 `.env`、模型权重或 `data/`。历史样例来源记录在 `frontend/demo-data.json` 中；`frontend/assets/d5-summer-night.mp3` 受现有 Git 忽略规则影响，换机器时需准备对应本地产物。
 
 ## 离线验证
@@ -53,6 +55,6 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-测试通过替身 Agent 验证双作词并行、匿名评审、组合选优、有限回炉、D9 影子报告与 D9.4 标注指标、队列、失败和接口行为，不调用 DeepSeek 或 GPU。当前完整回归为 90/90；真实运行证据和测试边界见 `docs/work-log.md`，详细计划见 `docs/02-implementation-plan.md`。
+测试通过替身 Agent 验证双作词并行、匿名评审、组合选优、有限回炉、D9 影子报告与 D9.4 标注指标、队列、失败和接口行为，不调用 DeepSeek 或 GPU。当前完整回归为 272/272；真实运行证据和测试边界见 `docs/work-log.md`，详细计划见 `docs/02-implementation-plan.md`。
 
 D9.4 首轮人工标注使用 `http://127.0.0.1:8000/d9-4-annotator.html`。只选择 `data/output/evaluations/d9-4-annotation-v1/cards.round1.jsonl` 和同目录的 `annotations.round1.jsonl`，不要打开包含程序预测与来源信息的 `manifest.private.jsonl`。

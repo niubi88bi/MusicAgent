@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from time import sleep
 from pathlib import Path
 from typing import Mapping
+from uuid import uuid4
 from pydantic import BaseModel
+
+
+_SNAPSHOT_REPLACE_RETRIES = 4
+_SNAPSHOT_RETRY_DELAY_SECONDS = 0.05
 
 
 def load_persisted_task_snapshots(root: Path) -> list[dict]:
@@ -46,9 +53,27 @@ def public_text_state(state: Mapping[str, object]) -> dict:
 def write_task_snapshot(job_dir: Path, snapshot: dict) -> None:
     """原子替换最新快照，失败时仍保留已完成的歌词和逐轮报告。"""
     job_dir.mkdir(parents=True, exist_ok=True)
-    temporary = job_dir / "task.json.tmp"
-    temporary.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(job_dir / "task.json")
+    target = job_dir / "task.json"
+    # 不使用固定的 task.json.tmp：Windows 下多个写入者共享同一个临时文件
+    # 会互相覆盖或在 replace 时触发 PermissionError。
+    temporary = job_dir / f".task.json.{uuid4().hex}.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        for attempt in range(_SNAPSHOT_REPLACE_RETRIES):
+            try:
+                os.replace(temporary, target)
+                return
+            except PermissionError:
+                if attempt == _SNAPSHOT_REPLACE_RETRIES - 1:
+                    raise
+                sleep(_SNAPSHOT_RETRY_DELAY_SECONDS * (attempt + 1))
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def write_text_artifacts(job_dir: Path, state: Mapping[str, object]) -> None:
