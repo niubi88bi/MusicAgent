@@ -44,6 +44,14 @@ DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "data/output/full-song-120-validation"
 LABEL_PATTERN = re.compile(r"^\[([^\]]+)\]$")
 UNFINISHED_MARKERS = ("待续", "未完", "省略", "...", "……")
 MAX_DURATION_FIT_REWRITES = 2
+RETEST_PRONUNCIATION_SOURCE = "照亮脚下的坑洼"
+RETEST_PRONUNCIATION_REPLACEMENT = "照亮轻快的步伐"
+RETEST_EXPECTED_PRONUNCIATION_OCCURRENCES = 3
+RETEST_TERMINAL_VERSE = """[Verse]
+推开家门换鞋把外套挂架
+窗台绿萝安静等我说话
+晚风从窗缝溜进来道晚安
+我笑着说明天还要一起走啊"""
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -54,6 +62,43 @@ def _write_json(path: Path, payload: object) -> None:
 
 def _count_chinese(text: str) -> int:
     return sum("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def build_manual_feedback_retest_lyrics(lyrics: str) -> tuple[str, dict[str, Any]]:
+    """只应用人工试听确认的两项唯一修订；无法唯一匹配时失败关闭。"""
+
+    normalized = lyrics.rstrip()
+    pronunciation_occurrences = normalized.count(RETEST_PRONUNCIATION_SOURCE)
+    terminal_verse_occurrences = normalized.count(RETEST_TERMINAL_VERSE)
+    if pronunciation_occurrences != RETEST_EXPECTED_PRONUNCIATION_OCCURRENCES:
+        raise ValueError(
+            "发音修订片段数量不符合冻结预期："
+            f"expected={RETEST_EXPECTED_PRONUNCIATION_OCCURRENCES}, "
+            f"actual={pronunciation_occurrences}"
+        )
+    if terminal_verse_occurrences != 1 or not normalized.endswith(
+        RETEST_TERMINAL_VERSE
+    ):
+        raise ValueError(
+            "末尾 Verse 不是唯一且位于歌词结尾，拒绝非确定性删除："
+            f"occurrences={terminal_verse_occurrences}"
+        )
+
+    without_terminal_verse = normalized[: -len(RETEST_TERMINAL_VERSE)].rstrip()
+    revised = without_terminal_verse.replace(
+        RETEST_PRONUNCIATION_SOURCE,
+        RETEST_PRONUNCIATION_REPLACEMENT,
+    )
+    return revised, {
+        "patch_mode": "deterministic_manual_feedback_retest_v1",
+        "pronunciation_patch": {
+            "source": RETEST_PRONUNCIATION_SOURCE,
+            "replacement": RETEST_PRONUNCIATION_REPLACEMENT,
+            "occurrences": pronunciation_occurrences,
+        },
+        "removed_terminal_block": RETEST_TERMINAL_VERSE,
+        "removed_terminal_block_occurrences": terminal_verse_occurrences,
+    }
 
 
 def _section_blocks(lyrics: str) -> list[dict[str, Any]]:
@@ -79,7 +124,7 @@ def audit_duration_fit(
     *,
     duration_seconds: int,
 ) -> dict[str, Any]:
-    """检查本次 120 秒候选的基本完整性，不把它写入正式质量分。"""
+    """检查长歌候选的基本完整性，不把生成安全上限写入正式质量分。"""
 
     blocks = _section_blocks(lyrics)
     parsed_lines = parse_lyric_lines(lyrics)
@@ -114,7 +159,7 @@ def audit_duration_fit(
     has_unfinished_marker = any(marker in lyrics for marker in UNFINISHED_MARKERS)
     issues: list[str] = []
 
-    # 120 秒的阈值是本次隔离验证的保守 sanity check，不是生产评分规则。
+    # 这些阈值是本次隔离验证的保守 sanity check，不随生成安全上限线性增加。
     if len(singing_lines) < 24:
         issues.append(f"演唱行仅 {len(singing_lines)} 行，低于本次验证下限 24 行")
     chinese_chars = _count_chinese("\n".join(line_texts))
@@ -141,6 +186,7 @@ def audit_duration_fit(
         "audit_name": "full_song_duration_fit_shadow_v1",
         "advisory_only_for_formal_quality": True,
         "requested_duration_seconds": duration_seconds,
+        "duration_semantics": "generation_upper_bound",
         "passed": not issues,
         "issues": issues,
         "section_labels": supported_labels,
@@ -477,6 +523,138 @@ def run_text_stage(theme: str, duration_seconds: int, job_dir: Path) -> bool:
         llm.close()
 
 
+def prepare_manual_feedback_retest(
+    source_job_dir: Path,
+    duration_seconds: int,
+    output_root: Path,
+) -> tuple[Path, bool]:
+    """从冻结源任务构造确定性复验文本，不调用 LLM、不覆盖源产物。"""
+
+    started_at = time.perf_counter()
+    job_dir = (output_root / uuid4().hex).resolve()
+    job_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        requirement = SongRequirement.model_validate_json(
+            (source_job_dir / "requirement.json").read_text(encoding="utf-8")
+        )
+        source_draft = LyricDraft.model_validate_json(
+            (source_job_dir / "lyric_draft.json").read_text(encoding="utf-8")
+        )
+        plan = ProductionPlan.model_validate_json(
+            (source_job_dir / "production_plan.json").read_text(encoding="utf-8")
+        )
+        revised_lyrics, patch_report = build_manual_feedback_retest_lyrics(
+            source_draft.lyrics
+        )
+        revised_note = source_draft.creative_note.replace(
+            "Hook重复四次", "Hook重复三次"
+        )
+        revised_note = (
+            f"{revised_note} 人工试听复验版删除末尾Verse，并将易误唱词替换为“步伐”。"
+        )
+        revised_draft = source_draft.model_copy(
+            update={"lyrics": revised_lyrics, "creative_note": revised_note}
+        )
+        quality_report = _quality_report_for_draft(
+            revised_draft,
+            requirement,
+            duration_seconds=duration_seconds,
+        )
+        duration_audit = audit_duration_fit(
+            revised_draft.lyrics,
+            revised_draft.hook,
+            duration_seconds=duration_seconds,
+        )
+        quality_ok = quality_report.get("passed") is True
+        admitted = quality_ok and duration_audit.get("passed") is True
+        scores = {
+            "rhyme": quality_report["rhyme"]["score"],
+            "structure": quality_report["structure"]["score"],
+            "total": quality_report["total_score"],
+        }
+
+        _write_json(
+            job_dir / "requirement.json", requirement.model_dump(mode="json")
+        )
+        _write_json(
+            job_dir / "lyric_draft.json", revised_draft.model_dump(mode="json")
+        )
+        _write_json(job_dir / "production_plan.json", plan.model_dump(mode="json"))
+        _write_json(
+            job_dir / "quality_report.json",
+            {
+                "quality_status": "passed" if quality_ok else "capped",
+                "attempts": 1,
+                "selected_attempt": 1,
+                "scores": scores,
+                "quality_report": quality_report,
+            },
+        )
+        _write_json(job_dir / "duration_fit_audit.json", duration_audit)
+        _write_json(
+            job_dir / "retest_preparation.json",
+            {
+                "source_job_dir": str(source_job_dir.resolve()),
+                "requested_duration_seconds": duration_seconds,
+                "duration_semantics": "generation_upper_bound",
+                "source_manual_review": {
+                    "lyrics_complete": False,
+                    "missing_line_estimate": "4-5",
+                    "pronunciation_issue": "坑洼被唱成坑刷",
+                    "end_to_end_status": "failed",
+                },
+                "patch_report": patch_report,
+                "llm_calls": 0,
+                "source_job_preserved": True,
+            },
+        )
+        _write_json(
+            job_dir / "text_stage.json",
+            {
+                "theme": requirement.theme,
+                "requested_duration_seconds": duration_seconds,
+                "duration_semantics": "generation_upper_bound",
+                "mode": "deterministic_manual_feedback_retest_v1",
+                "quality_status": "passed" if quality_ok else "capped",
+                "quality_passed": quality_ok,
+                "duration_fit_passed": duration_audit.get("passed") is True,
+                "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+                "llm_telemetry": {
+                    "logical_call_count": 0,
+                    "api_attempt_count": 0,
+                    "total_tokens": 0,
+                },
+            },
+        )
+        (job_dir / "lyrics.txt").write_text(
+            revised_draft.lyrics + "\n", encoding="utf-8"
+        )
+        print(f"复验任务目录：{job_dir}", flush=True)
+        print(
+            "复验文本准入："
+            f"quality_passed={quality_ok}, "
+            f"duration_fit_passed={duration_audit.get('passed')}, "
+            f"admitted={admitted}",
+            flush=True,
+        )
+        return job_dir, admitted
+    except Exception as error:
+        _write_json(
+            job_dir / "failure.json",
+            {
+                "stage": "retest_text",
+                "source_job_dir": str(source_job_dir.resolve()),
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+                "source_job_preserved": True,
+                "llm_calls": 0,
+            },
+        )
+        print(f"复验文本阶段失败：{type(error).__name__}: {error}", file=sys.stderr)
+        return job_dir, False
+
+
 def _run_tool(command: list[str]) -> dict[str, Any]:
     try:
         completed = subprocess.run(
@@ -510,10 +688,11 @@ def probe_audio(path: Path, requested_duration: int) -> dict[str, Any]:
         "path": str(path.resolve()),
         "file_exists": path.is_file(),
         "file_size_bytes": path.stat().st_size if path.is_file() else 0,
-        "requested_duration_seconds": requested_duration,
+        "generation_limit_seconds": requested_duration,
         "ffprobe": None,
         "decode_check": None,
-        "duration_close_to_target": False,
+        "duration_close_to_limit": False,
+        "inferred_stop_reason": "unknown",
         "manual_listen_required": True,
         "manual_listen_status": "pending",
     }
@@ -539,12 +718,15 @@ def probe_audio(path: Path, requested_duration: int) -> dict[str, Any]:
                 fmt = payload.get("format", {})
                 actual = float(fmt["duration"])
                 result["actual_duration_seconds"] = round(actual, 3)
-                result["duration_tolerance_seconds"] = max(
-                    10.0, requested_duration * 0.10
+                result["limit_detection_tolerance_seconds"] = 0.5
+                result["duration_close_to_limit"] = (
+                    actual >= requested_duration - 0.5
                 )
-                result["duration_close_to_target"] = abs(
-                    actual - requested_duration
-                ) <= result["duration_tolerance_seconds"]
+                result["inferred_stop_reason"] = (
+                    "generation_limit_reached"
+                    if result["duration_close_to_limit"]
+                    else "model_eos_before_limit"
+                )
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                 result["ffprobe_parse_error"] = str(error)
     else:
@@ -558,7 +740,7 @@ def probe_audio(path: Path, requested_duration: int) -> dict[str, Any]:
         result["decode_check_unavailable"] = True
     result["automated_audio_checks_passed"] = bool(
         result.get("file_exists")
-        and result.get("duration_close_to_target")
+        and result.get("actual_duration_seconds", 0) > 0
         and result.get("decodable") is True
     )
     return result
@@ -591,7 +773,7 @@ def run_audio_stage(job_dir: Path, duration_seconds: int) -> bool:
         )
         del requirement
         generator = HeartMuLaGenerator.from_settings(output_dir=job_dir / "audio")
-        print(f"开始 HeartMuLa {duration_seconds} 秒生成…", flush=True)
+        print(f"开始 HeartMuLa 生成，安全上限 {duration_seconds} 秒…", flush=True)
         result = generator.generate(
             lyrics=draft.lyrics,
             tags=plan.tags,
@@ -601,10 +783,10 @@ def run_audio_stage(job_dir: Path, duration_seconds: int) -> bool:
         audio_checks = probe_audio(result.output_path, duration_seconds)
         payload = {
             "status": "done" if audio_checks["automated_audio_checks_passed"] else "needs_review",
-            "requested_duration_seconds": duration_seconds,
+            "generation_limit_seconds": duration_seconds,
             "elapsed_seconds": round(time.perf_counter() - started_at, 3),
             "audio": audio_checks,
-            "note": "自动检查不能替代人工试听；需确认中途歌词未明显截断、结尾无异常。",
+            "note": "停止原因由成品时长相对上限推断；自动检查不能替代人工试听，仍需确认歌词覆盖、发音和结尾。",
         }
         _write_json(job_dir / "audio_result.json", payload)
         print(f"音频产物：{result.output_path.resolve()}", flush=True)
@@ -633,21 +815,42 @@ def run_audio_stage(job_dir: Path, duration_seconds: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="隔离验证约 120 秒完整歌曲")
-    parser.add_argument("--stage", choices=("text", "audio", "all"), default="all")
+    parser = argparse.ArgumentParser(description="隔离验证长歌自然结束与歌词覆盖")
+    parser.add_argument(
+        "--stage",
+        choices=("text", "audio", "all", "retest-text", "retest-all"),
+        default="all",
+    )
     parser.add_argument("--theme", default="晚风陪我回家")
-    parser.add_argument("--duration", type=int, default=120)
+    parser.add_argument("--duration", type=int, default=240)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--job-dir", type=Path, help="audio 阶段使用已有文本产物目录")
+    parser.add_argument(
+        "--source-job",
+        type=Path,
+        help="retest 阶段使用的冻结源任务目录",
+    )
     args = parser.parse_args()
-    if args.duration != 120:
-        parser.error("本隔离脚本只接受 --duration 120")
+    if not 120 <= args.duration <= 240:
+        parser.error("本隔离脚本只接受 120 到 240 秒的生成安全上限")
 
     os.chdir(PROJECT_ROOT)
     if args.stage == "audio":
         if args.job_dir is None:
             parser.error("--stage audio 必须提供 --job-dir")
         return 0 if run_audio_stage(args.job_dir.resolve(), args.duration) else 1
+
+    if args.stage in {"retest-text", "retest-all"}:
+        if args.source_job is None:
+            parser.error("retest 阶段必须提供 --source-job")
+        retest_job_dir, text_ok = prepare_manual_feedback_retest(
+            args.source_job.resolve(),
+            args.duration,
+            args.out.resolve(),
+        )
+        if not text_ok or args.stage == "retest-text":
+            return 0 if text_ok else 1
+        return 0 if run_audio_stage(retest_job_dir, args.duration) else 1
 
     job_dir = (args.out / uuid4().hex).resolve()
     job_dir.mkdir(parents=True, exist_ok=False)
