@@ -1,0 +1,7 @@
+.song-mode-picker{display:flex;gap:8px;margin:4px 16px 14px;flex-wrap:wrap}
+.song-mode-picker label{flex:1 1 170px;display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid #3c4939;border-radius:7px;background:#202620;cursor:pointer}
+.song-mode-picker label:has(input:checked){border-color:#8db597;background:#29372d}
+.song-mode-picker input{accent-color:var(--accent)}
+.song-mode-picker strong,.song-mode-picker small{display:block}
+.song-mode-picker strong{color:#d1ddd3;font-size:12px;font-weight:500}
+.song-mode-picker small{color:#8f9f91;font-size:10px;line-height:1.5;margin-top:3px}

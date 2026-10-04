@@ -61,6 +61,22 @@ class TextTaskApiTests(unittest.TestCase):
         self.assertEqual(generator.calls, 0)
         self.assertEqual(result["attempts"], 2)
 
+    def test_full_mode_is_persisted_and_short_lyrics_cannot_start_audio(self):
+        seen = []
+        def execute(theme, observer, production_constraints=None, *, song_mode):
+            seen.append(song_mode)
+            return fake_execute([GOOD_DRAFT])(theme, observer)
+        with self.client(execute) as client:
+            response = client.post("/api/tasks", json={"theme": "夏夜回家", "song_mode": "full"})
+            self.assertEqual(response.status_code, 202)
+            task = self.await_done(client, response.json()["task_id"])
+            self.assertEqual(task["status"], "done")
+            self.assertEqual(task["input"]["song_mode"], "full")
+            self.assertEqual(task["input"]["audio_limit_seconds"], 240)
+            self.assertEqual(seen, ["full"])
+            self.assertFalse(task["result"]["full_song_audit"]["passed"])
+            self.assertEqual(client.post(f"/api/tasks/{task['task_id']}/audio").status_code, 409)
+
     def test_submission_saves_versions_and_real_event_order(self):
         with self.client(fake_execute([BAD_DRAFT, GOOD_DRAFT])) as client:
             response = client.post("/api/tasks", json={"theme": " 夏夜回家 "})

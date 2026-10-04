@@ -1,4 +1,4 @@
-/* 文本任务走同源 API，音频仍只播放历史样例；外来文本均按文本节点渲染。 */
+/* 歌曲模式随文本任务保存；音频上限由服务端根据任务模式决定。 */
 'use strict';
 const $ = (id) => document.getElementById(id);
 let records = [];
@@ -109,9 +109,10 @@ function renderProcess(record) {
     record.history.forEach((round) => addProcess(`第 ${round.attempt} 稿${round.scores ? ` · 规则总分 ${round.scores.total}` : ' · 待质检'}`, round.revision_feedback || (round.scores ? '本轮规则检查已完成。' : '草稿已生成，尚未完成规则检查。')));
     if (record.report?.selected_attempt) addProcess(`采用第 ${record.report.selected_attempt} 稿`, `生成 ${record.report.attempts} 次 · 回炉 ${Math.max(0, record.report.attempts - 1)} 次`);
     if (task.status === 'failed') addProcess('任务失败', task.error);
-    if (task.status === 'done') addProcess('文本创作完成', '文本产物已保存，试听会作为独立任务按需生成。');
+    if (task.status === 'done') addProcess('文本创作完成', '文本产物已保存，音频会作为独立任务按需生成。');
+    if (task.input?.song_mode === 'full' && task.result?.full_song_audit) addProcess(task.result.full_song_audit.passed ? '完整歌曲文本准入通过' : '完整歌曲文本准入未通过', task.result.full_song_audit.passed ? '仅确认歌词结构与长度；是否唱完及发音仍需人工试听。' : task.result.full_song_audit.issues.join('；'));
     if (record.audio_task) {
-      const audioStatus = {pending:'等待生成',running:'HeartMuLa 生成中',done:'30 秒试听已生成',failed:'试听生成失败'}[record.audio_task.status];
+      const audioStatus = {pending:'等待生成',running:'HeartMuLa 生成中',done:record.task.input?.song_mode === 'full' ? '完整歌曲音频已生成' : '30 秒试听已生成',failed:'音频生成失败'}[record.audio_task.status];
       addProcess(audioStatus, record.audio_task.error || `使用最终采用的第 ${record.audio_task.selected_attempt} 稿，不重新生成歌词。`);
     }
     return;
@@ -231,7 +232,7 @@ function openRecord(id, refresh = false) {
       audio.src = record.audio_url;
     }
     $('audio-title').textContent = record.title; $('download-audio').href = record.audio_url;
-    $('audio-meta').textContent = record.audio_task ? 'HeartMuLa · 30 秒试听' : '历史生成音频';
+    $('audio-meta').textContent = record.audio_task ? (record.task?.input?.song_mode === 'full' ? 'HeartMuLa · 完整歌曲（请人工试听）' : 'HeartMuLa · 30 秒试听') : '历史生成音频';
   } else if (audio.hasAttribute('src')) {
     audio.pause();
     audio.removeAttribute('src');
@@ -246,12 +247,16 @@ function updateAudioAction(record) {
   const button = $('audio-preview-button');
   const note = $('text-audio-note').querySelector('p');
   const status = record.audio_task?.status;
-  button.disabled = !record.task || record.task.status !== 'done' || status === 'pending' || status === 'running';
-  button.textContent = status === 'pending' ? '等待生成…' : status === 'running' ? 'HeartMuLa 生成中…' : status === 'failed' ? '重新生成 30 秒试听 ↗' : '生成 30 秒试听 ↗';
+  const full = record.task?.input?.song_mode === 'full';
+  const audit = record.task?.result?.full_song_audit;
+  const blocked = full && (record.report?.quality_status !== 'passed' || audit?.passed !== true);
+  button.disabled = !record.task || record.task.status !== 'done' || blocked || status === 'pending' || status === 'running';
+  button.textContent = status === 'pending' ? '等待生成…' : status === 'running' ? 'HeartMuLa 生成中…' : blocked ? '完整歌曲歌词未达准入' : status === 'failed' ? (full ? '重新生成完整歌曲 ↗' : '重新生成 30 秒试听 ↗') : (full ? '生成完整歌曲 ↗' : '生成 30 秒试听 ↗');
   note.textContent = status === 'pending' ? '任务已提交，正在等待唯一的 GPU 执行位。' :
     status === 'running' ? '正在使用最终采用的歌词生成音频，页面可以继续浏览。' :
     status === 'failed' ? record.audio_task.error :
-    record.task ? `将使用最终采用的第 ${record.report?.selected_attempt || 1} 稿调用本地 HeartMuLa，不会重新调用 DeepSeek。` :
+    blocked ? `本次长歌歌词未满足准入：${audit?.issues?.join('；') || '规则质检未通过'}。请重新创作后再生成音频。` :
+    record.task ? (full ? `将使用最终采用的第 ${record.report?.selected_attempt || 1} 稿生成长歌；240 秒是生成上限，不保证具体时长或歌词全部唱完，完成后请试听核对。` : `将使用最终采用的第 ${record.report?.selected_attempt || 1} 稿调用本地 HeartMuLa，不会重新调用 DeepSeek。`) :
     '这份历史文本示例没有可关联的按需音频任务。';
 }
 document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => {
@@ -349,7 +354,7 @@ async function submitText(event) {
   if (theme.length < 2 || theme.length > 200) { notify('请输入 2～200 字的创作主题。'); $('theme').focus(); return; }
   const clarificationAnswers = selectedClarificationAnswers();
   if (pendingClarification && !clarificationAnswers.length) { notify('请先选择一种替代配器，或选择“系统按曲风选择”。'); return; }
-  const body = {theme};
+  const body = {theme, song_mode:document.querySelector('input[name="song-mode"]:checked')?.value || 'preview'};
   if (clarificationAnswers.length) body.clarification_answers = clarificationAnswers;
   submitting = true; setSubmitState();
   try {
@@ -385,7 +390,7 @@ async function initialize() {
     const health = await requestJson('/health');
     apiReady = health.text_tasks_enabled && health.llm_configured;
     document.querySelector('.preview-label').textContent = '文本创作';
-    document.querySelector('.preview-note').textContent = apiReady ? '支持真实歌词创作、规则质检与本地 HeartMuLa 30 秒试听。' : '请先配置文本模型密钥并重启服务。历史示例仍可查看。';
+    document.querySelector('.preview-note').textContent = apiReady ? '支持 30 秒试听与完整歌曲两种模式；完整歌曲需先通过歌词准入，生成后仍需人工试听。' : '请先配置文本模型密钥并重启服务。历史示例仍可查看。';
     await syncTasks();
     const id = new URL(location.href).searchParams.get('task');
     if (id) {

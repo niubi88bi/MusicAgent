@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>MusicAgent · 歌曲创作工作台</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="song-mode.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -29,6 +30,7 @@
             <p id="clarification-question"></p>
             <div id="clarification-options" class="clarification-options"></div>
           </section>
+          <div class="song-mode-picker" role="group" aria-label="歌曲生成模式"><label><input type="radio" name="song-mode" value="preview" checked><span><strong>30 秒试听</strong><small>短歌词 · 快速听方向</small></span></label><label><input type="radio" name="song-mode" value="full"><span><strong>完整歌曲</strong><small>长歌词 · 音频最多生成 240 秒，自然结束</small></span></label></div>
           <div class="composer-toolbar"><span class="mode-label"><span class="small-dot"></span> 歌词创作 <span class="mode-divider">/</span> 自动质检与改写</span><button class="primary-button" type="submit">生成歌词 <span aria-hidden="true">↗</span></button></div>
         </form>
         <div class="suggestions" aria-label="灵感提示"><span>从一点灵感开始</span><button data-prompt="夏夜下班回家，温暖治愈的 city pop">夏夜归途</button><button data-prompt="毕业那天和朋友告别，带着希望的流行歌曲">写给毕业的我们</button><button data-prompt="在雨天散步，安静温柔的中文民谣">雨天慢慢走</button></div>

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 
 from services.config import get_settings
 from services.task_store import TaskStore, TaskNotFoundError
@@ -27,6 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class TextTaskInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     theme: str = Field(min_length=2, max_length=200, strict=True)
+    song_mode: Literal["preview", "full"] = "preview"
     clarification_answers: list[ClarificationAnswer] = Field(
         default_factory=list, max_length=1
     )
@@ -141,7 +143,7 @@ def create_app(*, store=None, runner=None, audio_runner=None, include_persisted:
             raise HTTPException(503, "未配置文本模型密钥，请在本地配置后重启服务。")
         production_constraints = _resolve_production_constraints(body)
         try:
-            return runner.submit(body.theme, production_constraints)
+            return runner.submit(body.theme, production_constraints, song_mode=body.song_mode)
         except TaskQueueFullError:
             raise HTTPException(429, "创作队列已满（1 个运行、最多 2 个等待），请稍后再试。", headers={"Retry-After": "5"})
 
@@ -152,6 +154,7 @@ def create_app(*, store=None, runner=None, audio_runner=None, include_persisted:
     @app.post("/api/tasks/{task_id}/audio", status_code=202)
     def create_audio(task_id: str):
         task = find_text_task(task_id)
+        song_mode = task.get("input", {}).get("song_mode", "preview")
         result = task.get("result")
         if task.get("status") != "done" or not isinstance(result, dict):
             raise HTTPException(409, "只有已完成的文本任务可以生成试听。")
@@ -164,6 +167,10 @@ def create_app(*, store=None, runner=None, audio_runner=None, include_persisted:
             raise HTTPException(409, "文本任务缺少歌词或制作标签，不能生成试听。")
         if not isinstance(selected_attempt, int) or quality_status not in {"passed", "capped"}:
             raise HTTPException(409, "文本任务缺少最终采用版本，不能生成试听。")
+        if song_mode == "full":
+            audit = result.get("full_song_audit")
+            if quality_status != "passed" or not isinstance(audit, dict) or audit.get("passed") is not True:
+                raise HTTPException(409, "完整歌曲歌词尚未通过结构和长度准入，暂不调用 GPU。请查看任务中的检查问题。")
         try:
             return audio_runner.submit(
                 task_id,
@@ -171,6 +178,7 @@ def create_app(*, store=None, runner=None, audio_runner=None, include_persisted:
                 tags=tags,
                 selected_attempt=selected_attempt,
                 quality_status=quality_status,
+                duration_seconds=240 if song_mode == "full" else 30,
             )
         except AudioQueueFullError:
             raise HTTPException(429, "当前已有试听任务在生成，请完成后再试。", headers={"Retry-After": "10"})

@@ -1,6 +1,6 @@
 # MusicAgent
 
-中文歌曲创作工作台。当前 Web 版支持主题输入、双作词人并行创作、匿名主观评审与规则组合选优、最多三稿的规则回炉记录、制作方案，以及基于最终采用歌词的本地 HeartMuLa 30 秒按需试听。
+中文歌曲创作工作台。当前 Web 版支持主题输入、双作词人并行创作、匿名主观评审与规则组合选优、最多三稿的规则回炉记录、制作方案，以及本地 HeartMuLa 的 30 秒试听或完整歌曲按需生成。
 
 ## 启动（Windows PowerShell）
 
@@ -18,10 +18,12 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 
 ## 使用
 
-1. 输入 2～200 字主题，可以包含曲风和情绪，点击“生成歌词”。当前文本任务以 30 秒短歌为约束。
+1. 输入 2～200 字主题，可以包含曲风和情绪；选择“30 秒试听”（默认）或“完整歌曲”，再点击“生成歌词”。完整歌曲使用约两分钟的长歌词创作约束；它不是把 30 秒短歌词直接拉长。
 2. 作词人 A 偏重押韵结构，作词人 B 偏重意象表达；匿名评审 Agent 只看需求和 A/B 正文，从主题、自然度、情绪、叙事意象和 Hook 五维评分。页面显示并行节点、候选分数、入选依据，以及后续各稿质检与修改反馈。
-3. 文本完成后点击“生成 30 秒试听”。音频任务不会重新调用 DeepSeek；生成期间仍可查看歌词，失败后保留文本并允许手动重试。
+3. 文本完成后按所选模式生成音频。完整歌曲需同时通过原有规则质检和额外的歌词结构/长度准入，才可启动 GPU；未通过时页面显示原因，不自动消耗 GPU。音频任务不会重新调用 DeepSeek；失败后保留文本并允许手动重试。
 4. 同一服务进程内，刷新带 `?task=任务编号` 的地址可继续查询；终态音频记录可在服务重启后恢复查看。
+
+完整歌曲的 240 秒是 HeartMuLa 生成安全上限，不是固定成品时长，也不保证歌词唱全。生成后必须人工试听核对漏唱、发音和结尾；自动文本准入、MP3 存在或播放器可加载都不等于歌曲质量验收。长歌生成可能占用 GPU 数十分钟，本地仍只允许一个音频任务。
 
 主观评审不读取 persona 名称和规则分；单方重大主题问题先淘汰，主观总分相差不足 3 分时才用规则结果决胜。双方都有重大主题问题时，两位作词人最多共同回炉 1 次。入选后仍执行确定性规则质检，最多生成 3 稿（初稿 + 最多 2 次改写）；达到上限时采用规则分最高的一稿，`capped` 仍表示未通过。任务 `done` 只表示文本流程完成。
 
@@ -30,10 +32,10 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 ## 接口和保存
 
 - `GET /health`：服务和文本配置状态。
-- `POST /api/tasks`：请求体 `{"theme":"夏夜回家"}`，接收成功立即返回 202 和 `task_id`。
+- `POST /api/tasks`：请求体 `{"theme":"夏夜回家","song_mode":"preview"}` 或 `{"theme":"夏夜回家","song_mode":"full"}`；省略模式仍为 30 秒试听。接收成功立即返回 202 和 `task_id`。
 - `GET /api/tasks/{task_id}`：任务状态、真实节点事件、部分文本及最终结果。
 - `GET /api/tasks`：本次服务进程内的任务列表。
-- `POST /api/tasks/{task_id}/audio`：为已完成文本任务创建 30 秒本地试听任务，立即返回 202。
+- `POST /api/tasks/{task_id}/audio`：按文本任务已保存的模式创建音频任务；试听上限 30 秒，完整歌曲上限 240 秒。模式不可在音频请求中临时改写。
 - `GET /api/tasks/{task_id}/audio/status`：查询关联音频任务状态。
 - `GET /api/tasks/{task_id}/audio`：仅在生成成功后返回对应 MP3。
 
@@ -55,6 +57,6 @@ $env:PYTHONDONTWRITEBYTECODE = '1'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-测试通过替身 Agent 验证双作词并行、匿名评审、组合选优、有限回炉、D9 影子报告与 D9.4 标注指标、队列、失败和接口行为，不调用 DeepSeek 或 GPU。当前完整回归为 272/272；真实运行证据和测试边界见 `docs/work-log.md`，详细计划见 `docs/02-implementation-plan.md`。
+测试通过替身 Agent 验证双作词并行、匿名评审、组合选优、有限回炉、D9 影子报告与 D9.4 标注指标、队列、失败和接口行为，不调用 DeepSeek 或 GPU。完整歌曲 Web 新路径目前只有离线接口/规则验证，尚无真实 DeepSeek→HeartMuLa 端到端复验；真实运行证据和测试边界见 `docs/work-log.md`，详细计划见 `docs/02-implementation-plan.md`。
 
 D9.4 首轮人工标注使用 `http://127.0.0.1:8000/d9-4-annotator.html`。只选择 `data/output/evaluations/d9-4-annotation-v1/cards.round1.jsonl` 和同目录的 `annotations.round1.jsonl`，不要打开包含程序预测与来源信息的 `manifest.private.jsonl`。

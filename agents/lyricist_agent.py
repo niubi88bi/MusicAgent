@@ -48,11 +48,12 @@ LYRICIST_PERSONAS = {
 class LyricistAgent:
     """支持综合、押韵结构和意象表达三种稳定 persona 的作词 Agent。"""
 
-    def __init__(self, llm: JsonLLM, persona: str = "balanced") -> None:
+    def __init__(self, llm: JsonLLM, persona: str = "balanced", *, full_song: bool = False) -> None:
         if persona not in LYRICIST_PERSONAS:
             raise ValueError(f"未知作词人 persona：{persona}")
         self._llm = llm
         self._persona = LYRICIST_PERSONAS[persona]
+        self._full_song = full_song
 
     @property
     def persona_id(self) -> str:
@@ -71,6 +72,8 @@ class LyricistAgent:
         feedback = revision_feedback or "无"
         previous_lyrics = "无（这是首次创作）"
         revision_instruction = "请根据歌曲需求创作一版完整歌词。"
+        if self._full_song:
+            revision_instruction = "请创作适合约两分钟演唱的完整歌词，不要按 30 秒试听写短稿。"
         if previous_draft is not None:
             previous_lyrics = (
                 f"标题：{previous_draft.title}\n"
@@ -81,6 +84,16 @@ class LyricistAgent:
                 "这是回炉修改：必须以上一版歌词为基础，保留未被要求修改的内容、"
                 "主题和可用意象；仅为解决反馈中的问题而改写，不能完全另起一稿。"
             )
+            if self._full_song:
+                revision_instruction += "同时保留完整长歌结构和足够的演唱内容。"
+        full_song_instruction = (
+            "完整歌曲需至少两段 [Verse]、两段 [Chorus]、一段 [Bridge]，"
+            "只用这三类标签；正文至少 24 行、260 个中文字符，每段主歌和副歌至少 4 行，"
+            "Hook 在两段副歌中原样出现。不要使用省略号、待续等占位。"
+            + (f"目标辙口为「{requirement.target_rhyme_group}」；各段多数句尾尽量自然同辙，不要生硬凑字。"
+               if requirement.target_rhyme_group else "各段句尾保持自然且相对一致。")
+            if self._full_song else ""
+        )
         payload = self._llm.chat_json(
             [
                 {
@@ -90,6 +103,7 @@ class LyricistAgent:
                         "lyrics 必须使用英文方括号段落标签，且至少各有一个 [Verse]、[Chorus]、[Bridge]。"
                         "hook 是一句短而好记的中文歌词，必须在 lyrics 中原样出现。"
                         "避免解释、避免真实歌手名、避免侵权歌词。"
+                        f"{full_song_instruction}"
                         f"你的创作侧重点：{self._persona.instruction}"
                         "JSON 输出结构示例（仅说明格式，示例内容不得照抄）："
                         '{"title":"示例标题","lyrics":"[Verse]\\n示例主歌\\n[Chorus]\\n示例 Hook\\n[Bridge]\\n示例桥段",'
@@ -109,7 +123,7 @@ class LyricistAgent:
                 },
             ],
             temperature=0.85,
-            max_tokens=2200,
+            max_tokens=3000 if self._full_song else 2200,
             operation=self._operation_name(revision_feedback is not None),
             payload_validator=lambda payload: pydantic_validation_feedback(
                 LyricDraft, payload

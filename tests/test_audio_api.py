@@ -32,8 +32,11 @@ class AudioApiTests(unittest.TestCase):
         self.output.mkdir()
         self.addCleanup(shutil.rmtree, self.output, True)
 
-    def completed_task(self, store: TaskStore, result=None) -> str:
-        task_id = store.create({"theme": "测试主题", "mode": "text"})["task_id"]
+    def completed_task(self, store: TaskStore, result=None, *, song_mode=None) -> str:
+        payload = {"theme": "测试主题", "mode": "text"}
+        if song_mode:
+            payload["song_mode"] = song_mode
+        task_id = store.create(payload)["task_id"]
         store.update_status(task_id, TaskStatus.RUNNING)
         store.update_status(task_id, TaskStatus.DONE, result=result or RESULT)
         return task_id
@@ -74,6 +77,24 @@ class AudioApiTests(unittest.TestCase):
             duplicate = client.post(f"/api/tasks/{source_id}/audio").json()
             self.assertEqual(duplicate["audio_task_id"], audio["audio_task_id"])
             self.assertEqual(client.get(f"/api/tasks/{source_id}").json()["audio"]["status"], "done")
+
+    def test_full_song_requires_text_admission_and_uses_240_second_ceiling(self):
+        store = TaskStore()
+        missing_audit = self.completed_task(store, song_mode="full")
+        capped = self.completed_task(store, {**RESULT, "quality_status": "capped", "full_song_audit": {"passed": True}}, song_mode="full")
+        ready = self.completed_task(store, {**RESULT, "full_song_audit": {"passed": True}}, song_mode="full")
+        observed = []
+        def generate(source_dir, audio_task_id, duration):
+            observed.append(duration)
+            return self.fake_audio(source_dir, audio_task_id, duration)
+        with self.client(store, generate) as client:
+            self.assertEqual(client.post(f"/api/tasks/{missing_audit}/audio").status_code, 409)
+            self.assertEqual(client.post(f"/api/tasks/{capped}/audio").status_code, 409)
+            self.assertEqual(client.post(f"/api/tasks/{ready}/audio").status_code, 202)
+            audio = self.wait_audio(client, ready)
+            self.assertEqual(audio["duration_seconds"], 240)
+            self.assertEqual(audio["duration_semantics"], "generation_upper_bound")
+            self.assertEqual(observed, [240])
 
     def test_incomplete_or_malformed_text_is_rejected(self):
         store = TaskStore()

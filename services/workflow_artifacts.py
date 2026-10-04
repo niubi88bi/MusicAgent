@@ -40,7 +40,7 @@ def public_text_state(state: Mapping[str, object]) -> dict:
             "subjective_review_history", "candidate_regeneration_count", "candidate_selection",
             "selected_lyricist", "lyric_draft", "lyrics", "production_plan",
             "scores", "quality_report", "quality_status", "quality_history",
-            "attempts", "selected_attempt")
+            "attempts", "selected_attempt", "full_song_audit")
     result = {}
     for key in keys:
         value = state.get(key)

@@ -56,7 +56,7 @@ def execute_audio_subprocess(source_dir: Path, audio_task_id: str, duration: int
             stdout=log,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=30 * 60,
+            timeout=60 * 60 if duration == 240 else 30 * 60,
             check=False,
         )
     if completed.returncode != 0:
@@ -96,6 +96,8 @@ class AudioRunner:
         quality_status: str,
         duration_seconds: int = 30,
     ) -> dict:
+        if duration_seconds not in {30, 240}:
+            raise ValueError("Web 音频生成上限只能是 30 或 240 秒")
         with self._lock:
             if self._executor is None:
                 raise RuntimeError("音频执行器未启动")
@@ -113,6 +115,7 @@ class AudioRunner:
                 "status": "pending",
                 "backend": "heartmula-local",
                 "duration_seconds": duration_seconds,
+                "duration_semantics": "generation_upper_bound",
                 "selected_attempt": selected_attempt,
                 "quality_status": quality_status,
                 "created_at": _now(),
@@ -185,7 +188,8 @@ class AudioRunner:
                 error=None,
             )
         except subprocess.TimeoutExpired:
-            self._update(source_task_id, status="failed", finished_at=_now(), error="试听生成超过 30 分钟，已终止。")
+            minutes = 60 if record["duration_seconds"] == 240 else 30
+            self._update(source_task_id, status="failed", finished_at=_now(), error=f"音频生成超过 {minutes} 分钟，已终止。")
         except Exception:
             self._update(source_task_id, status="failed", finished_at=_now(), error="HeartMuLa 试听生成失败，请查看本地任务日志后重试。")
 
