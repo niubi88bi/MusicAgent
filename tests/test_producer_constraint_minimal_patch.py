@@ -30,6 +30,7 @@ from tools.rag.producer_constraint_patch import (
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintMinimalPatchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

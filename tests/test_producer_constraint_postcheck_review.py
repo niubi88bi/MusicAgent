@@ -20,6 +20,10 @@ MANIFEST_PATH = Path(
 )
 
 
+@unittest.skipUnless(
+    REVIEW_PATH.is_file() and MANIFEST_PATH.is_file(),
+    "private constraint-review dataset is not published",
+)
 class ProducerConstraintPostcheckReviewTests(unittest.TestCase):
     def setUp(self) -> None:
         self.review = MultiModelReview.model_validate_json(

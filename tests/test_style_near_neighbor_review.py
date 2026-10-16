@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.prepare_style_near_neighbor_review import prepare, _read_jsonl
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleNearNeighborReviewTests(unittest.TestCase):
     def test_packet_covers_all_cards_without_admission_mutation(self):
         root = Path(__file__).resolve().parents[1]

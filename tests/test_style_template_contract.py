@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.validate_style_template_contract import _read_jsonl, validate
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleTemplateContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

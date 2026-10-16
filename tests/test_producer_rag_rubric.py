@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 from agents.schemas import ProductionPlan
 from scripts.evaluate_producer_rag_gated_ab import build_blind_card
@@ -22,6 +23,7 @@ PLAN = {
 }
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class ProducerRAGRubricTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

@@ -65,7 +65,7 @@ function sampleCard(record) {
   const cover = node('span', 'cover ' + (record.audio_url ? 'record' : 'paper'), record.audio_url ? undefined : '词');
   cover.setAttribute('aria-hidden', 'true');
   const copy = node('span', 'example-copy');
-  copy.append(node('strong', '', record.title), node('p', '', record.subtitle), node('small', '', record.task ? '文本任务 · 查看进度与结果' : record.audio_url ? '真实音频 · 点击试听' : '真实文本 · 查看质检'));
+  copy.append(node('strong', '', record.title), node('p', '', record.subtitle), node('small', '', record.task ? '文本任务 · 查看进度与结果' : record.demo_kind === 'self_authored' ? '自拟示例 · 非模型产物' : record.audio_url ? '真实音频 · 点击试听' : '真实文本 · 查看质检'));
   button.append(cover, copy, node('span', 'example-arrow', '↗'));
   button.addEventListener('click', () => openRecord(record.id));
   return button;
@@ -85,6 +85,10 @@ function addProcess(title, detail) {
 }
 function renderProcess(record) {
   $('process-panel').replaceChildren();
+  if (record.demo_kind === 'self_authored') {
+    addProcess('自拟展示样本', '歌词与制作标签为公开版人工编写，仅用于展示页面结构；没有调用模型、规则质检或音频生成。');
+    return;
+  }
   if (record.task) {
     const task = record.task;
     for (const event of task.progress.events || []) {
@@ -124,9 +128,14 @@ function renderProcess(record) {
       addProcess(`第 ${round.attempt} 稿 · ${status}`, `规则总分 ${round.scores.total} / 100` + (round.revision_feedback ? '\n' + round.revision_feedback : ''));
     });
     addProcess(`采用第 ${record.report.selected_attempt} 稿`, `生成 ${record.report.attempts} 次 · 回炉 ${Math.max(0, record.report.attempts - 1)} 次`);
+  } else if (record.report?.quality_report) {
+    addProcess('最终歌词质检已保存', `规则总分 ${record.report.scores.total} / 100；独立验证只保存最终版本，不展示不存在的逐轮记录。`);
   } else { addProcess('歌词已保存', '这份历史作品生成时尚未记录逐轮质检，无法展示改写过程。'); }
+  if (record.provenance?.kind === 'isolated_validation') {
+    addProcess('独立长歌验证 · 人工试听通过', `实际时长 ${record.provenance.actual_duration_seconds} 秒；240 秒是生成安全上限。这是导入的历史成品，不代表新的 Web 生成路径已验收。`);
+  }
   addProcess('制作方案已保存', record.production.tags.join(' · '));
-  addProcess(record.audio_url ? '音频已生成' : '本任务未生成音频', record.audio_url ? '播放器中的音频与本任务保存的歌词对应。' : '本次验证跳过了音频模型，没有可播放音频。');
+  addProcess(record.audio_url ? '音频已生成' : '本任务未生成音频', record.audio_url ? '播放器中的音频与本作品保存的歌词对应。' : '本次验证跳过了音频模型，没有可播放音频。');
 }
 function renderLyrics(round) {
   const content = $('lyrics-content'); content.replaceChildren();
@@ -151,9 +160,9 @@ function renderQuality(round) {
   const report = round.quality_report;
   $('quality-status').className = 'status-label';
   if (!report) {
-    $('quality-status').textContent = current?.task ? '尚无结果' : '未记录';
+    $('quality-status').textContent = current?.task ? '尚无结果' : current?.demo_kind === 'self_authored' ? '未执行' : '未记录';
     const detail = node('div', 'quality-detail');
-    detail.append(node('h3', '', current?.task ? '等待规则检查结果' : '这是一份早期音频样例'), node('p', '', current?.task ? '只有本稿完成规则检查后才显示评分。' : '原任务没有保存规则质检报告，本页不补造分数，也不把音频生成成功标为歌词质检通过。'));
+    detail.append(node('h3', '', current?.task ? '等待规则检查结果' : current?.demo_kind === 'self_authored' ? '自拟展示样本' : '这是一份早期音频样例'), node('p', '', current?.task ? '只有本稿完成规则检查后才显示评分。' : current?.demo_kind === 'self_authored' ? '此样本未运行规则质检，不提供分数或通过结论。' : '原任务没有保存规则质检报告，本页不补造分数，也不把音频生成成功标为歌词质检通过。'));
     area.append(detail); return;
   }
   const status = round.quality_status;
@@ -192,11 +201,12 @@ function renderQuality(round) {
   detail.append(node('p', 'quality-note', '总分和通过门槛仍只由押韵与结构决定；节奏和主题词面信号仅作建议，不代表完整语义、可唱性或音乐听感。')); area.append(detail);
 }
 function selectVersion(index) {
-  let round = current.history[index] || {lyrics:current.lyrics,attempt:1};
+  let round = current.history[index] || {lyrics:current.lyrics,attempt:current.report?.selected_attempt || 1,
+    quality_report:current.report?.quality_report,quality_status:current.report?.quality_status};
   // capped 的最高分可能来自早期稿；最终采用稿的结论不能沿用其旧 retrying 状态。
   if (current.report?.selected_attempt === round.attempt && current.report.quality_status === 'capped') round = {...round, quality_status:'capped'};
   renderLyrics(round); renderQuality(round);
-  $('version-caption').textContent = current.history.length ? `第 ${round.attempt} 稿 · 共 ${current.history.length} 稿` : current.task ? '尚无歌词草稿' : '原任务歌词';
+  $('version-caption').textContent = current.history.length ? `第 ${round.attempt} 稿 · 共 ${current.history.length} 稿` : current.task ? '尚无歌词草稿' : current.demo_kind === 'self_authored' ? '自拟示例歌词' : current.report?.quality_report ? '最终保存歌词' : '原任务歌词';
   $('selected-version').textContent = current.report?.selected_attempt === round.attempt ? '最终采用' : '';
 }
 function openRecord(id, refresh = false) {
@@ -218,7 +228,7 @@ function openRecord(id, refresh = false) {
   $('work-title').textContent = record.title; $('work-source').textContent = record.source_label;
   $('work-tags').replaceChildren(...record.production.tags.slice(0, 5).map((tag) => node('span', '', tag)));
   $('version-select').replaceChildren();
-  (record.history.length ? record.history : [{attempt:1}]).forEach((round, index) => { const option = node('option', '', !record.history.length && record.task ? '尚无草稿' : `第 ${round.attempt} 稿`); option.value = index; $('version-select').append(option); });
+  (record.history.length ? record.history : [{attempt:1}]).forEach((round, index) => { const option = node('option', '', !record.history.length ? (record.task ? '尚无草稿' : '最终歌词') : `第 ${round.attempt} 稿`); option.value = index; $('version-select').append(option); });
   const selectedIndex = Math.max(0, record.history.findIndex((round) => round.attempt === record.report?.selected_attempt));
   const index = refresh && (record.task?.status !== 'done' || wasDone) ? Math.min(oldIndex, Math.max(0,record.history.length - 1)) : selectedIndex;
   $('version-select').value = index; $('version-select').disabled = record.history.length < 2;
@@ -232,7 +242,7 @@ function openRecord(id, refresh = false) {
       audio.src = record.audio_url;
     }
     $('audio-title').textContent = record.title; $('download-audio').href = record.audio_url;
-    $('audio-meta').textContent = record.audio_task ? (record.task?.input?.song_mode === 'full' ? 'HeartMuLa · 完整歌曲（请人工试听）' : 'HeartMuLa · 30 秒试听') : '历史生成音频';
+    $('audio-meta').textContent = record.audio_task ? (record.task?.input?.song_mode === 'full' ? 'HeartMuLa · 完整歌曲（请人工试听）' : 'HeartMuLa · 30 秒试听') : record.audio_label || '历史生成音频';
   } else if (audio.hasAttribute('src')) {
     audio.pause();
     audio.removeAttribute('src');
@@ -261,7 +271,7 @@ function updateAudioAction(record) {
 }
 document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => {
   const action = button.dataset.action;
-  if (action === 'quality-demo') { const demo = records.find(item => item.id === 'text-validation'); if (demo) openRecord(demo.id); else notify('示例数据还未加载，请稍后再试。'); }
+  if (action === 'quality-demo') { const demo = records.find(item => item.id === 'public-self-authored-demo'); if (demo) openRecord(demo.id); else notify('示例数据还未加载，请稍后再试。'); }
   else showView(action);
 }));
 document.querySelector('.brand').addEventListener('click', (event) => { event.preventDefault(); showView('home'); });

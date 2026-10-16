@@ -17,6 +17,7 @@ HOLDOUT_PATH = Path(
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintMinimalPatchHoldoutTests(unittest.TestCase):
     def test_frozen_holdout_has_four_unique_families(self) -> None:
         manifest = FaultManifest.model_validate_json(

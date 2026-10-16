@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.evaluate_producer_rag_ab import load_cases
+from scripts.evaluate_producer_rag_ab import CASES_PATH, load_cases
 from scripts.summarize_producer_rag_ab_review import (
     CaseHumanReview,
     CandidateHumanReview,
@@ -23,6 +23,7 @@ def candidate(score: int, *, unsupported: bool = False) -> CandidateHumanReview:
     )
 
 
+@unittest.skipUnless(CASES_PATH.is_file(), "private Producer RAG cases are not published")
 class ProducerRAGReviewTests(unittest.TestCase):
     def test_decode_uses_key_and_preserves_single_reviewer_boundary(self) -> None:
         manifest = load_cases()

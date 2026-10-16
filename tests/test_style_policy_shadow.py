@@ -6,6 +6,7 @@ from scripts.evaluate_style_fixed_queries import _read_jsonl
 from scripts.evaluate_style_policy_shadow import evaluate
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StylePolicyShadowTests(unittest.TestCase):
     def test_role_and_vocal_policies(self):
         root = Path(__file__).resolve().parents[1]

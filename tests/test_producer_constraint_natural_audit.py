@@ -14,6 +14,7 @@ from scripts.evaluate_producer_constraint_natural_audit import (
 MANIFEST_PATH = Path("data/miaoxiang/producer_constraint_natural_audit.v1.json")
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintNaturalAuditTests(unittest.TestCase):
     def setUp(self) -> None:
         self.manifest = load_manifest(MANIFEST_PATH)

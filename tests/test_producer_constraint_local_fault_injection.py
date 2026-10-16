@@ -18,6 +18,7 @@ MANIFEST_PATH = Path(
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintLocalFaultInjectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

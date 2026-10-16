@@ -16,6 +16,10 @@ from scripts.summarize_producer_rag_rubric_review import (
 REVIEW_PATH = "data/miaoxiang/producer_rag_rubric_multi_model_review.v1.json"
 
 
+@unittest.skipUnless(
+    CASES_PATH.is_file() and Path(REVIEW_PATH).is_file(),
+    "private Producer RAG review dataset is not published",
+)
 class ProducerRAGRubricReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

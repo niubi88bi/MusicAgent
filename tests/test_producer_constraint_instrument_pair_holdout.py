@@ -13,6 +13,7 @@ from scripts.build_producer_constraint_instrument_pair_holdout import (
 from scripts.evaluate_producer_constraint_instrument_pair_holdout import run_holdout
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintInstrumentPairHoldoutTests(unittest.TestCase):
     def test_manifest_has_independent_seven_case_mix(self) -> None:
         manifest = InstrumentPairHoldoutManifest.model_validate(build_manifest())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from scripts.evaluate_producer_rag_gated_ab import load_cases
 from scripts.summarize_producer_rag_ab_review import (
@@ -23,6 +24,7 @@ def _score(value: int) -> CandidateHumanReview:
     )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerRAGGatedReviewTests(unittest.TestCase):
     def test_decode_separates_injected_and_no_rag_pairs(self) -> None:
         manifest = load_cases()

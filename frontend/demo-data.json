@@ -1,0 +1,22 @@
+{
+  "records": [
+    {
+      "id": "public-self-authored-demo",
+      "demo_kind": "self_authored",
+      "title": "窗边的纸飞机",
+      "subtitle": "自拟歌词 · 页面展示样本 · 未运行模型",
+      "source_label": "公开版自拟示例 / 非真实生成记录",
+      "requirement": {
+        "theme": "放学后把心愿写在纸飞机上",
+        "genre": "轻快流行"
+      },
+      "production": {
+        "tags": ["轻快流行", "纸飞机", "自拟示例"]
+      },
+      "lyrics": "[Verse]\n放学铃声落在窗台\n一张白纸折出期待\n写下小小心愿和对白\n让风替我飞向云海\n\n[Chorus]\n纸飞机慢慢飞起来\n带着今天的笑与期待\n如果明天还有风来\n就把新故事再展开",
+      "history": [],
+      "report": null,
+      "audio_url": null
+    }
+  ]
+}

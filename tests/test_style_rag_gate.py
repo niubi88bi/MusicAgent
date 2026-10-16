@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from scripts.evaluate_style_rag_gate import (
     HOLDOUT_PATH,
@@ -13,6 +14,7 @@ from scripts.evaluate_style_rag_gate import (
 from tools.rag.style_retrieval_policy import decide_style_retrieval, parse_constraints
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleRAGGateTests(unittest.TestCase):
     def test_development_and_acceptance_contracts_pass(self) -> None:
         report = build_report(load_acceptance(), load_manifest(HOLDOUT_PATH))

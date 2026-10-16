@@ -18,6 +18,10 @@ REVIEW_PATH = Path(
 MANIFEST_PATH = Path("data/miaoxiang/producer_constraint_severity_holdout.v1.json")
 
 
+@unittest.skipUnless(
+    REVIEW_PATH.is_file() and MANIFEST_PATH.is_file(),
+    "private constraint-review dataset is not published",
+)
 class ProducerConstraintSeverityReviewTests(unittest.TestCase):
     def setUp(self) -> None:
         self.review = MultiModelReview.model_validate_json(

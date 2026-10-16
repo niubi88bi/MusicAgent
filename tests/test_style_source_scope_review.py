@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from scripts.build_style_source_scope_review import (
     DEFAULT_ADMISSION_AUDIT_PATH,
@@ -9,6 +10,7 @@ from scripts.build_style_source_scope_review import (
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleSourceScopeReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

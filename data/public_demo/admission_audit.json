@@ -1,0 +1,9 @@
+{
+  "source_use_admission": {
+    "schema_version": "1.0",
+    "default_status": "evaluation_only",
+    "policy_note": "公开样本仅供契约验证，未授权进入本地演示或公开产品索引。",
+    "sources": {},
+    "cards": {}
+  }
+}

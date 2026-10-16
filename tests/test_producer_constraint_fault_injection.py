@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 from scripts.evaluate_producer_constraint_fault_injection import (
     build_blind_card,
@@ -19,6 +20,7 @@ from tools.rag.producer_constraint_guard import (
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintFaultInjectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

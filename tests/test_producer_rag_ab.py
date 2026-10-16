@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from agents.producer_agent import ProducerAgent
 from scripts.evaluate_producer_rag_ab import (
+    CASES_PATH,
     _compact_card,
     blind_mapping,
     build_blind_card,
@@ -43,6 +45,7 @@ class CaptureLLM:
         return PLAN
 
 
+@unittest.skipUnless(CASES_PATH.is_file(), "private Producer RAG cases are not published")
 class ProducerRAGABTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -86,6 +89,7 @@ class ProducerRAGABTests(unittest.TestCase):
         self.assertTrue(on[1]["content"].startswith(off[1]["content"]))
         self.assertIn("候选不匹配时必须忽略", on[1]["content"])
 
+    @unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
     def test_compact_card_excludes_generation_and_license_fields(self) -> None:
         cards, sources, policy = load_index_inputs()
         direct, _, blocked = select_local_demo_cards(cards, sources, policy)

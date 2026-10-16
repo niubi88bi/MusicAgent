@@ -26,6 +26,7 @@ def _load_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+@unittest.skipUnless(CARDS_PATH.is_file() and ADMISSION_AUDIT_PATH.is_file(), "private style-card dataset is not published")
 class RagSchemaTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

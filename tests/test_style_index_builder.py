@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from tools.rag.build_style_index import prepare_build_report
 from tools.rag.style_index import (
@@ -10,6 +11,7 @@ from tools.rag.style_index import (
 )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleIndexBuilderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

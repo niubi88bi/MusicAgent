@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.prepare_style_card_admission_review import _read_json, _read_jsonl, prepare
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleCardAdmissionReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

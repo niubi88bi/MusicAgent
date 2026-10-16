@@ -13,6 +13,21 @@ data/wheels/
 data/*.db
 data/*.jsonl
 
+# 公开展示副本仅保留 data/public_demo/ 自拟小样本
+data/miaoxiang/
+data/d9_4_source_plan.json
+data/rhyme_candidate_seeds.v1.json
+
+# 内部求职规划与历史工作记录不进入公开版
+docs/01-project-plan.md
+docs/01-project-plan.pdf
+docs/02-implementation-plan.md
+docs/04-benchmark-narrative.md
+docs/05-github-reference-research.md
+docs/recruiting-plan.md
+docs/interview-qa.md
+docs/agentcs-audit.md
+
 # 音频产物
 *.mp3
 *.wav

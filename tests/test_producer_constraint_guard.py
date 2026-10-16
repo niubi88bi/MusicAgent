@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 
 from agents.schemas import ProductionPlan
 from scripts.evaluate_producer_constraint_guard import (
@@ -33,6 +34,7 @@ def _plan(style_prompt: str, vocal: str, arrangement: str) -> ProductionPlan:
     )
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/output/evaluations").is_dir(), "private evaluation artifacts are not published")
 class ProducerConstraintGuardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

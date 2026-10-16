@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.evaluate_style_fixed_queries import _read_jsonl, evaluate
 
 
+@unittest.skipUnless((Path(__file__).resolve().parents[1] / "data/miaoxiang/style_templates.v2.jsonl").is_file(), "private style-card dataset is not published")
 class StyleFixedQueryExpandedTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

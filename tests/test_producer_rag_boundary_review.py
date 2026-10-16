@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.evaluate_producer_rag_boundary import load_manifest
+from scripts.evaluate_producer_rag_boundary import CASES_PATH, load_manifest
 from scripts.summarize_producer_rag_ab_review import (
     CandidateHumanReview,
     CaseHumanReview,
@@ -23,6 +23,7 @@ def _score(value: int) -> CandidateHumanReview:
     )
 
 
+@unittest.skipUnless(CASES_PATH.is_file(), "private Producer RAG cases are not published")
 class ProducerRAGBoundaryReviewTests(unittest.TestCase):
     def test_decode_reports_family_stability(self) -> None:
         manifest = load_manifest()

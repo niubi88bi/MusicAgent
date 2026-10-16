@@ -1,6 +1,7 @@
 """完整歌曲 Web 模式离线准入测试。"""
 
 from pathlib import Path
+import json
 import unittest
 
 from agents.lyricist_agent import LyricistAgent
@@ -9,6 +10,18 @@ from tools.lyrics_quality.full_song_audit import audit_full_song
 
 
 class FullSongWebModeTests(unittest.TestCase):
+    def test_public_demo_is_explicitly_self_authored(self):
+        root = Path(__file__).resolve().parents[1]
+        records = json.loads((root / "frontend/demo-data.json").read_text(encoding="utf-8"))["records"]
+        self.assertEqual(len(records), 1)
+        demo = records[0]
+        self.assertEqual(demo["id"], "public-self-authored-demo")
+        self.assertEqual(demo["demo_kind"], "self_authored")
+        self.assertIsNone(demo["report"])
+        self.assertIsNone(demo["audio_url"])
+        self.assertNotIn("source_run", demo)
+        self.assertNotIn("provenance", demo)
+
     def test_full_lyricist_uses_long_prompt_without_changing_preview(self):
         class CaptureLLM:
             def __init__(self):

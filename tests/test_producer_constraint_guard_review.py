@@ -18,6 +18,10 @@ REVIEW_PATH = Path(
 )
 
 
+@unittest.skipUnless(
+    REVIEW_PATH.is_file() and CASES_PATH.is_file(),
+    "private constraint-review dataset is not published",
+)
 class ProducerConstraintGuardReviewTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
